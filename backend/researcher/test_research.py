@@ -85,7 +85,7 @@ def test_research(topic=None):
         response = requests.post(
             research_url,
             json=payload,
-            timeout=180  # Give it 3 minutes for research
+            timeout=360  # Give it 6 minutes for research
         )
         response.raise_for_status()
         

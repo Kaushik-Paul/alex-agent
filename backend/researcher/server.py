@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from agents import Agent, Runner, trace
+from agents.model_settings import ModelSettings
 from agents.extensions.models.litellm_model import LitellmModel
 
 # Suppress LiteLLM warnings about optional dependencies
@@ -64,6 +65,7 @@ async def run_research_agent(topic: str = None) -> str:
                 name="Alex Investment Researcher",
                 instructions=get_agent_instructions(),
                 model=model,
+                model_settings=ModelSettings(parallel_tool_calls=False),
                 tools=[ingest_financial_document],
                 mcp_servers=[playwright_mcp],
             )

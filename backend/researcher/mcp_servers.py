@@ -2,6 +2,7 @@
 MCP server configurations for the Alex Researcher
 """
 from agents.mcp import MCPServerStdio
+from agents.mcp.util import create_static_tool_filter
 
 
 def create_playwright_mcp_server(timeout_seconds=60):
@@ -39,9 +40,22 @@ def create_playwright_mcp_server(timeout_seconds=60):
             print("DEBUG: Chrome not found via glob, using fallback path")
             args.extend(["--executable-path", "/root/.cache/ms-playwright/chromium-1187/chrome-linux/chrome"])
     
+    # Strictly limit available MCP tools to avoid flaky interactions
+    # Allow only navigation and content reading to keep behavior predictable
+    tool_filter = create_static_tool_filter(
+        allowed_tool_names=[
+            "browser_navigate",
+            "browser_snapshot",
+        ]
+    )
+
     params = {
         "command": "npx",
         "args": args
     }
     
-    return MCPServerStdio(params=params, client_session_timeout_seconds=timeout_seconds)
+    return MCPServerStdio(
+        params=params,
+        client_session_timeout_seconds=timeout_seconds,
+        tool_filter=tool_filter,
+    )
