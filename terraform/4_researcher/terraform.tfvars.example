@@ -7,6 +7,9 @@ aws_region = "us-east-1"
 # Your OpenAI API key (get from https://platform.openai.com/api-keys)
 openai_api_key = "sk-..."
 
+# Your OpenRouter API key (get from https://openrouter.ai/settings/keys)
+openrouter_api_key = "sk-..."
+
 # API endpoint from Part 3 (get from Terraform output or API Gateway console)
 alex_api_endpoint = "https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/ingest"
 
