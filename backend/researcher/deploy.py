@@ -193,6 +193,9 @@ def main():
                                             "ALEX_API_ENDPOINT": os.environ.get(
                                                 "ALEX_API_ENDPOINT", ""
                                             ),
+                                            "OPENROUTER_API_KEY": os.environ.get(
+                                                "OPENROUTER_API_KEY", ""
+                                            ),
                                         },
                                     },
                                     "ImageRepositoryType": "ECR",

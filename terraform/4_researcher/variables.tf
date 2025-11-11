@@ -9,6 +9,12 @@ variable "openai_api_key" {
   sensitive   = true
 }
 
+variable "openrouter_api_key" {
+  description = "Openrouter API key for the researcher agent"
+  type        = string
+  sensitive   = true
+}
+
 variable "alex_api_endpoint" {
   description = "Alex API endpoint from Part 3"
   type        = string
