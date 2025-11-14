@@ -263,12 +263,12 @@ def create_agent(job_id: str, portfolio_summary: Dict[str, Any], db):
     context = PlannerContext(job_id=job_id)
 
     # Get model configuration
-    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
+    model_id = os.getenv("OPENROUTER_MODEL_ID", "nvidia/nemotron-nano-12b-v2-vl:free")
     # Set region for LiteLLM Bedrock calls
     bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
     os.environ["AWS_REGION_NAME"] = bedrock_region
 
-    model = LitellmModel(model=f"bedrock/{model_id}")
+    model = LitellmModel(model=f"openrouter/{model_id}")
 
     tools = [
         invoke_reporter,

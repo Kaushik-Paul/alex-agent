@@ -18,14 +18,14 @@ class Evaluation(BaseModel):
 
 async def evaluate(original_instructions, original_task, original_output) -> Evaluation:
     # Get model configuration
-    model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
+    model_id = os.getenv("OPENROUTER_MODEL_ID", "nvidia/nemotron-nano-12b-v2-vl:free")
     # Set region for LiteLLM Bedrock calls
     bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
     logger.info(f"DEBUG: BEDROCK_REGION from env = {bedrock_region}")
     os.environ["AWS_REGION_NAME"] = bedrock_region
     logger.info(f"DEBUG: Set AWS_REGION_NAME to {bedrock_region}")
 
-    model = LitellmModel(model=f"bedrock/{model_id}")
+    model = LitellmModel(model=f"openrouter/{model_id}")
 
     instructions = """
 You are an Evaluation Agent that evaluates the quality of a financial report from a financial planning agent.

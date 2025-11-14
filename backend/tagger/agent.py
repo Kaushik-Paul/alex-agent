@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Get configuration
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
 BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-west-2")
+OPENROUTER_MODEL_ID = os.getenv("OPENROUTER_MODEL_ID", "nvidia/nemotron-nano-12b-v2-vl:free")
 
 
 class AllocationBreakdown(BaseModel):
@@ -172,13 +173,13 @@ async def classify_instrument(
     """
     try:
         # Initialize the model
-        model_id = BEDROCK_MODEL_ID
+        model_id = OPENROUTER_MODEL_ID
 
         # Set region for LiteLLM Bedrock calls
         bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
         os.environ["AWS_REGION_NAME"] = bedrock_region
 
-        model = LitellmModel(model=f"bedrock/{model_id}")
+        model = LitellmModel(model=f"openrouter/{model_id}")
 
         # Create the classification task
         task = CLASSIFICATION_PROMPT.format(
