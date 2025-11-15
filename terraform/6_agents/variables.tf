@@ -73,3 +73,13 @@ variable "openai_api_key" {
   default     = ""
   sensitive   = true
 }
+
+variable "openrouter_api_key" {
+  description = "Openrouter API key for market data"
+  type        = string
+}
+
+variable "openrouter_model_id" {
+  description = "Openrouter model id for market data"
+  type        = string
+}

@@ -56,6 +56,9 @@ def package_lambda():
         req_file.write_text("\n".join(filtered_requirements))
 
         # Use Docker to install dependencies for Lambda's architecture
+        # Ensure resulting files are owned by the host user to avoid cleanup PermissionError
+        uid = os.getuid()
+        gid = os.getgid()
         docker_cmd = [
             "docker",
             "run",
@@ -70,7 +73,12 @@ def package_lambda():
             "/bin/bash",
             "public.ecr.aws/lambda/python:3.12",
             "-c",
-            """cd /build && pip install --target ./package -r requirements.txt && pip install --target ./package --no-deps /database""",
+            f"""set -euo pipefail
+cd /build
+pip install --no-cache-dir --target ./package -r requirements.txt
+pip install --no-cache-dir --target ./package --no-deps /database
+chown -R {uid}:{gid} /build
+""",
         ]
 
         run_command(docker_cmd)

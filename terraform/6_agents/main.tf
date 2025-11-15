@@ -240,6 +240,8 @@ resource "aws_lambda_function" "planner" {
       DATABASE_NAME      = "alex"
       VECTOR_BUCKET      = var.vector_bucket
       BEDROCK_MODEL_ID   = var.bedrock_model_id
+      OPENROUTER_API_KEY = var.openrouter_api_key
+      OPENROUTER_MODEL_ID = var.openrouter_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       SAGEMAKER_ENDPOINT = var.sagemaker_endpoint
@@ -290,6 +292,8 @@ resource "aws_lambda_function" "tagger" {
       AURORA_SECRET_ARN  = var.aurora_secret_arn
       DATABASE_NAME      = "alex"
       BEDROCK_MODEL_ID   = var.bedrock_model_id
+      OPENROUTER_API_KEY = var.openrouter_api_key
+      OPENROUTER_MODEL_ID = var.openrouter_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       # LangFuse observability (optional)
@@ -330,6 +334,8 @@ resource "aws_lambda_function" "reporter" {
       AURORA_SECRET_ARN  = var.aurora_secret_arn
       DATABASE_NAME      = "alex"
       BEDROCK_MODEL_ID   = var.bedrock_model_id
+      OPENROUTER_API_KEY = var.openrouter_api_key
+      OPENROUTER_MODEL_ID = var.openrouter_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       SAGEMAKER_ENDPOINT = var.sagemaker_endpoint
@@ -371,6 +377,8 @@ resource "aws_lambda_function" "charter" {
       AURORA_SECRET_ARN  = var.aurora_secret_arn
       DATABASE_NAME      = "alex"
       BEDROCK_MODEL_ID   = var.bedrock_model_id
+      OPENROUTER_API_KEY = var.openrouter_api_key
+      OPENROUTER_MODEL_ID = var.openrouter_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       # LangFuse observability (optional)
@@ -411,6 +419,8 @@ resource "aws_lambda_function" "retirement" {
       AURORA_SECRET_ARN  = var.aurora_secret_arn
       DATABASE_NAME      = "alex"
       BEDROCK_MODEL_ID   = var.bedrock_model_id
+      OPENROUTER_API_KEY = var.openrouter_api_key
+      OPENROUTER_MODEL_ID = var.openrouter_model_id
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       # LangFuse observability (optional)
