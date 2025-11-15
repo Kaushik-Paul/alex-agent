@@ -67,11 +67,11 @@ def package_lambda():
             "public.ecr.aws/lambda/python:3.12",
             "-c",
             f"""set -euo pipefail
-cd /build
-pip install --no-cache-dir --target ./package -r requirements.txt
-pip install --no-cache-dir --target ./package --no-deps /database
-chown -R {uid}:{gid} /build
-"""
+            cd /build
+            pip install --no-cache-dir --target ./package -r requirements.txt
+            pip install --no-cache-dir --target ./package --no-deps /database
+            chown -R {uid}:{gid} /build
+            """
         ]
         
         run_command(docker_cmd)
