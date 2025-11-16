@@ -113,25 +113,21 @@ resource "aws_iam_role_policy" "lambda_agents_policy" {
         ]
         Resource = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:alex-*"
       },
-      # Aurora Data API access
+      # DynamoDB access for database tables
       {
         Effect = "Allow"
         Action = [
-          "rds-data:ExecuteStatement",
-          "rds-data:BatchExecuteStatement",
-          "rds-data:BeginTransaction",
-          "rds-data:CommitTransaction",
-          "rds-data:RollbackTransaction"
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
         ]
-        Resource = var.aurora_cluster_arn
-      },
-      # Secrets Manager for database credentials
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
+        Resource = [
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${var.db_table_prefix}*",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${var.db_table_prefix}*/index/*"
         ]
-        Resource = var.aurora_secret_arn
       },
       # S3 Vectors access for all agents
       {
@@ -235,9 +231,7 @@ resource "aws_lambda_function" "planner" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DB_TABLE_PREFIX    = var.db_table_prefix
       VECTOR_BUCKET      = var.vector_bucket
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
@@ -288,9 +282,7 @@ resource "aws_lambda_function" "tagger" {
 
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DB_TABLE_PREFIX    = var.db_table_prefix
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
       OPENROUTER_MODEL_ID = var.openrouter_model_id
@@ -330,9 +322,7 @@ resource "aws_lambda_function" "reporter" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DB_TABLE_PREFIX    = var.db_table_prefix
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
       OPENROUTER_MODEL_ID = var.openrouter_model_id
@@ -373,9 +363,7 @@ resource "aws_lambda_function" "charter" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DB_TABLE_PREFIX    = var.db_table_prefix
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
       OPENROUTER_MODEL_ID = var.openrouter_model_id
@@ -415,9 +403,7 @@ resource "aws_lambda_function" "retirement" {
   
   environment {
     variables = {
-      AURORA_CLUSTER_ARN = var.aurora_cluster_arn
-      AURORA_SECRET_ARN  = var.aurora_secret_arn
-      DATABASE_NAME      = "alex"
+      DB_TABLE_PREFIX    = var.db_table_prefix
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
       OPENROUTER_MODEL_ID = var.openrouter_model_id

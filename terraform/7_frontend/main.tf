@@ -116,31 +116,28 @@ resource "aws_iam_role_policy_attachment" "api_lambda_basic" {
   role       = aws_iam_role.api_lambda_role.name
 }
 
-# Policy for Aurora Data API access
-resource "aws_iam_role_policy" "api_lambda_aurora" {
-  name = "${local.name_prefix}-api-lambda-aurora"
+# Policy for DynamoDB access (API Lambda)
+resource "aws_iam_role_policy" "api_lambda_dynamodb" {
+  name = "${local.name_prefix}-api-lambda-dynamodb"
   role = aws_iam_role.api_lambda_role.id
 
   policy = jsonencode({
-    Version = "2012-10-17"
+    Version = "2012-10-17",
     Statement = [
       {
-        Effect = "Allow"
+        Effect = "Allow",
         Action = [
-          "rds-data:ExecuteStatement",
-          "rds-data:BatchExecuteStatement",
-          "rds-data:BeginTransaction",
-          "rds-data:CommitTransaction",
-          "rds-data:RollbackTransaction"
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ],
+        Resource = [
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${data.terraform_remote_state.database.outputs.db_table_prefix}*",
+          "arn:aws:dynamodb:${var.aws_region}:${data.aws_caller_identity.current.account_id}:table/${data.terraform_remote_state.database.outputs.db_table_prefix}*/index/*"
         ]
-        Resource = data.terraform_remote_state.database.outputs.aurora_cluster_arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = data.terraform_remote_state.database.outputs.aurora_secret_arn
       }
     ]
   })
@@ -204,10 +201,8 @@ resource "aws_lambda_function" "api" {
 
   environment {
     variables = {
-      # Database configuration from Part 5
-      AURORA_CLUSTER_ARN = data.terraform_remote_state.database.outputs.aurora_cluster_arn
-      AURORA_SECRET_ARN  = data.terraform_remote_state.database.outputs.aurora_secret_arn
-      AURORA_DATABASE    = data.terraform_remote_state.database.outputs.database_name
+      # Database configuration from Part 5 (DynamoDB)
+      DB_TABLE_PREFIX    = data.terraform_remote_state.database.outputs.db_table_prefix
       DEFAULT_AWS_REGION = var.aws_region
 
       # SQS configuration from Part 6
@@ -224,7 +219,7 @@ resource "aws_lambda_function" "api" {
 
   # Ensure Lambda waits for dependencies including CloudFront
   depends_on = [
-    aws_iam_role_policy.api_lambda_aurora,
+    aws_iam_role_policy.api_lambda_dynamodb,
     aws_iam_role_policy.api_lambda_sqs,
     aws_iam_role_policy.api_lambda_invoke,
     aws_cloudfront_distribution.main

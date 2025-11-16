@@ -1,16 +1,17 @@
 """
-Aurora Data API Client Wrapper
-Provides a simple interface for database operations
+DynamoDB Client Wrapper
+Provides a simple interface for database operations used by models
 """
 
 import boto3
 import json
 import os
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import date, datetime
+from typing import Dict, Any, Optional, List
+from datetime import datetime, date
 from decimal import Decimal
 from botocore.exceptions import ClientError
 import logging
+from boto3.dynamodb.conditions import Key, Attr
 
 # Try to load .env file if it exists
 try:
@@ -23,288 +24,170 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class DataAPIClient:
-    """Wrapper for AWS RDS Data API to simplify database operations"""
+class DynamoClient:
+    """Lightweight DynamoDB helper used by the Database models"""
 
     def __init__(
         self,
-        cluster_arn: str = None,
-        secret_arn: str = None,
-        database: str = None,
-        region: str = None,
-    ):
+        table_prefix: Optional[str] = None,
+        region_name: Optional[str] = None,
+        endpoint_url: Optional[str] = None,
+        table_names: Optional[Dict[str, str]] = None,
+    ) -> None:
         """
-        Initialize Data API client
+        Initialize DynamoDB client
 
         Args:
-            cluster_arn: Aurora cluster ARN (or from env AURORA_CLUSTER_ARN)
-            secret_arn: Secrets Manager ARN (or from env AURORA_SECRET_ARN)
-            database: Database name (or from env AURORA_DATABASE)
-            region: AWS region (or from env AWS_REGION)
+            table_prefix: Optional prefix for table names, from env DB_TABLE_PREFIX (default: "alex_")
+            region_name: AWS region, from env DEFAULT_AWS_REGION
+            endpoint_url: Optional local/test endpoint
+            table_names: Explicit table names override, e.g. {"users": "alex_users", ...}
         """
-        self.cluster_arn = cluster_arn or os.environ.get("AURORA_CLUSTER_ARN")
-        self.secret_arn = secret_arn or os.environ.get("AURORA_SECRET_ARN")
-        self.database = database or os.environ.get("AURORA_DATABASE", "alex")
+        self.region = region_name or os.environ.get("DEFAULT_AWS_REGION", "us-east-1")
+        self.resource = boto3.resource("dynamodb", region_name=self.region, endpoint_url=endpoint_url)
 
-        if not self.cluster_arn or not self.secret_arn:
-            raise ValueError(
-                "Missing required Aurora configuration. "
-                "Set AURORA_CLUSTER_ARN and AURORA_SECRET_ARN environment variables."
-            )
+        prefix = (table_prefix if table_prefix is not None else os.environ.get("DB_TABLE_PREFIX", "alex_")).strip()
+        self.tables: Dict[str, str] = {
+            "users": f"{prefix}users",
+            "instruments": f"{prefix}instruments",
+            "accounts": f"{prefix}accounts",
+            "positions": f"{prefix}positions",
+            "jobs": f"{prefix}jobs",
+        }
+        if table_names:
+            self.tables.update(table_names)
 
-        self.region = os.environ.get("DEFAULT_AWS_REGION", "us-east-1")
-        self.client = boto3.client("rds-data", region_name=self.region)
+    def table(self, logical_name: str):
+        """Return a boto3 Table by logical name (users, instruments, accounts, positions, jobs)"""
+        return self.resource.Table(self.tables[logical_name])
 
-    def execute(self, sql: str, parameters: List[Dict] = None) -> Dict:
-        """
-        Execute a SQL statement
+    # -------------------------
+    # Basic item operations
+    # -------------------------
+    def put_item(self, logical_table: str, item: Dict[str, Any]) -> None:
+        self.table(logical_table).put_item(Item=self._encode_item(item))
 
-        Args:
-            sql: SQL statement to execute
-            parameters: Optional list of parameters for prepared statement
+    def get_item(self, logical_table: str, key: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        resp = self.table(logical_table).get_item(Key=key)
+        return self._decode_item(resp.get("Item")) if resp.get("Item") else None
 
-        Returns:
-            Response from Data API
-        """
-        try:
-            kwargs = {
-                "resourceArn": self.cluster_arn,
-                "secretArn": self.secret_arn,
-                "database": self.database,
-                "sql": sql,
-                "includeResultMetadata": True,  # Include column names
-            }
+    def delete_item(self, logical_table: str, key: Dict[str, Any]) -> None:
+        self.table(logical_table).delete_item(Key=key)
 
-            if parameters:
-                kwargs["parameters"] = parameters
-
-            response = self.client.execute_statement(**kwargs)
-            return response
-
-        except ClientError as e:
-            logger.error(f"Database error: {e}")
-            raise
-
-    def query(self, sql: str, parameters: List[Dict] = None) -> List[Dict]:
-        """
-        Execute a SELECT query and return results as list of dicts
-
-        Args:
-            sql: SELECT statement
-            parameters: Optional parameters
-
-        Returns:
-            List of dictionaries with column names as keys
-        """
-        response = self.execute(sql, parameters)
-
-        if "records" not in response:
-            return []
-
-        # Extract column names
-        columns = [col["name"] for col in response.get("columnMetadata", [])]
-
-        # Convert records to dictionaries
-        results = []
-        for record in response["records"]:
-            row = {}
-            for i, col in enumerate(columns):
-                value = self._extract_value(record[i])
-                row[col] = value
-            results.append(row)
-
-        return results
-
-    def query_one(self, sql: str, parameters: List[Dict] = None) -> Optional[Dict]:
-        """
-        Execute a SELECT query and return first result
-
-        Args:
-            sql: SELECT statement
-            parameters: Optional parameters
-
-        Returns:
-            Dictionary with column names as keys, or None if no results
-        """
-        results = self.query(sql, parameters)
-        return results[0] if results else None
-
-    def insert(self, table: str, data: Dict, returning: str = None) -> str:
-        """
-        Insert a record into a table
-
-        Args:
-            table: Table name
-            data: Dictionary of column names and values
-            returning: Column to return (e.g., 'id', 'clerk_user_id')
-
-        Returns:
-            Value of returning column if specified
-        """
-        columns = list(data.keys())
-        placeholders = []
-
-        # Check if columns need type casting
-        for col in columns:
-            if isinstance(data[col], (dict, list)):
-                placeholders.append(f":{col}::jsonb")
-            elif isinstance(data[col], Decimal):
-                placeholders.append(f":{col}::numeric")
-            elif isinstance(data[col], date) and not isinstance(data[col], datetime):
-                placeholders.append(f":{col}::date")
-            elif isinstance(data[col], datetime):
-                placeholders.append(f":{col}::timestamp")
-            else:
-                placeholders.append(f":{col}")
-
-        sql = f"""
-            INSERT INTO {table} ({", ".join(columns)})
-            VALUES ({", ".join(placeholders)})
-        """
-
-        # Add RETURNING clause if specified
-        if returning:
-            sql += f" RETURNING {returning}"
-
-        parameters = self._build_parameters(data)
-        response = self.execute(sql, parameters)
-
-        # Return value if RETURNING was used
-        if returning and response.get("records"):
-            return self._extract_value(response["records"][0][0])
-        return None
-
-    def update(self, table: str, data: Dict, where: str, where_params: Dict = None) -> int:
-        """
-        Update records in a table
-
-        Args:
-            table: Table name
-            data: Dictionary of columns to update
-            where: WHERE clause (without WHERE keyword)
-            where_params: Parameters for WHERE clause
-
-        Returns:
-            Number of affected rows
-        """
-        # Build SET clause with type casting where needed
-        set_parts = []
-        for col, val in data.items():
-            if isinstance(val, (dict, list)):
-                set_parts.append(f"{col} = :{col}::jsonb")
-            elif isinstance(val, Decimal):
-                set_parts.append(f"{col} = :{col}::numeric")
-            elif isinstance(val, date) and not isinstance(val, datetime):
-                set_parts.append(f"{col} = :{col}::date")
-            elif isinstance(val, datetime):
-                set_parts.append(f"{col} = :{col}::timestamp")
-            else:
-                set_parts.append(f"{col} = :{col}")
-
-        set_clause = ", ".join(set_parts)
-
-        sql = f"""
-            UPDATE {table}
-            SET {set_clause}
-            WHERE {where}
-        """
-
-        # Combine data and where parameters
-        all_params = {**data, **(where_params or {})}
-        parameters = self._build_parameters(all_params)
-
-        response = self.execute(sql, parameters)
-        return response.get("numberOfRecordsUpdated", 0)
-
-    def delete(self, table: str, where: str, where_params: Dict = None) -> int:
-        """
-        Delete records from a table
-
-        Args:
-            table: Table name
-            where: WHERE clause (without WHERE keyword)
-            where_params: Parameters for WHERE clause
-
-        Returns:
-            Number of deleted rows
-        """
-        sql = f"DELETE FROM {table} WHERE {where}"
-        parameters = self._build_parameters(where_params) if where_params else None
-
-        response = self.execute(sql, parameters)
-        return response.get("numberOfRecordsUpdated", 0)
-
-    def begin_transaction(self) -> str:
-        """Begin a database transaction"""
-        response = self.client.begin_transaction(
-            resourceArn=self.cluster_arn, secretArn=self.secret_arn, database=self.database
-        )
-        return response["transactionId"]
-
-    def commit_transaction(self, transaction_id: str):
-        """Commit a database transaction"""
-        self.client.commit_transaction(
-            resourceArn=self.cluster_arn, secretArn=self.secret_arn, transactionId=transaction_id
-        )
-
-    def rollback_transaction(self, transaction_id: str):
-        """Rollback a database transaction"""
-        self.client.rollback_transaction(
-            resourceArn=self.cluster_arn, secretArn=self.secret_arn, transactionId=transaction_id
-        )
-
-    def _build_parameters(self, data: Dict) -> List[Dict]:
-        """Convert dictionary to Data API parameter format"""
+    def update_item(self, logical_table: str, key: Dict[str, Any], data: Dict[str, Any]) -> None:
         if not data:
-            return []
+            return
+        update_expr_parts = []
+        expr_vals: Dict[str, Any] = {}
+        expr_names: Dict[str, str] = {}
+        for i, (k, v) in enumerate(data.items(), start=1):
+            placeholder = f":v{i}"
+            name_placeholder = f"#n{i}"
+            update_expr_parts.append(f"{name_placeholder} = {placeholder}")
+            expr_vals[placeholder] = self._encode_scalar(v)
+            expr_names[name_placeholder] = k
 
-        parameters = []
-        for key, value in data.items():
-            param = {"name": key}
+        update_expr = "SET " + ", ".join(update_expr_parts)
+        self.table(logical_table).update_item(
+            Key=key,
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_vals,
+            ExpressionAttributeNames=expr_names,
+        )
 
-            if value is None:
-                param["value"] = {"isNull": True}
-            elif isinstance(value, bool):
-                param["value"] = {"booleanValue": value}
-            elif isinstance(value, int):
-                param["value"] = {"longValue": value}
-            elif isinstance(value, float):
-                param["value"] = {"doubleValue": value}
-            elif isinstance(value, Decimal):
-                param["value"] = {"stringValue": str(value)}
-            elif isinstance(value, (date, datetime)):
-                param["value"] = {"stringValue": value.isoformat()}
-            elif isinstance(value, dict):
-                param["value"] = {"stringValue": json.dumps(value)}
-            elif isinstance(value, list):
-                param["value"] = {"stringValue": json.dumps(value)}
-            else:
-                param["value"] = {"stringValue": str(value)}
+    # -------------------------
+    # Query helpers
+    # -------------------------
+    def query_by_pk(self, logical_table: str, pk_name: str, pk_value: Any, sk_name: Optional[str] = None, sk_begins_with: Optional[str] = None, limit: Optional[int] = None, scan_index_forward: Optional[bool] = None) -> List[Dict[str, Any]]:
+        tbl = self.table(logical_table)
+        key_cond = Key(pk_name).eq(pk_value)
+        if sk_name and sk_begins_with:
+            key_cond &= Key(sk_name).begins_with(sk_begins_with)
+        kwargs = {"KeyConditionExpression": key_cond}
+        if limit:
+            kwargs["Limit"] = limit
+        if scan_index_forward is not None:
+            kwargs["ScanIndexForward"] = scan_index_forward
+        resp = tbl.query(**kwargs)
+        return [self._decode_item(i) for i in resp.get("Items", [])]
 
-            parameters.append(param)
+    def query_gsi_eq(self, logical_table: str, index_name: str, key_name: str, key_value: Any, sk_name: Optional[str] = None, begins_with: Optional[str] = None, sk_eq: Optional[Any] = None, limit: Optional[int] = None, scan_index_forward: Optional[bool] = None, filter_expression: Optional[Any] = None) -> List[Dict[str, Any]]:
+        tbl = self.table(logical_table)
+        key_cond = Key(key_name).eq(key_value)
+        if sk_name and sk_eq is not None:
+            key_cond &= Key(sk_name).eq(sk_eq)
+        elif sk_name and begins_with:
+            key_cond &= Key(sk_name).begins_with(begins_with)
+        kwargs = {"IndexName": index_name, "KeyConditionExpression": key_cond}
+        if filter_expression is not None:
+            kwargs["FilterExpression"] = filter_expression
+        if limit:
+            kwargs["Limit"] = limit
+        if scan_index_forward is not None:
+            kwargs["ScanIndexForward"] = scan_index_forward
+        resp = tbl.query(**kwargs)
+        return [self._decode_item(i) for i in resp.get("Items", [])]
 
-        return parameters
+    def scan(self, logical_table: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        tbl = self.table(logical_table)
+        kwargs: Dict[str, Any] = {}
+        if limit:
+            kwargs["Limit"] = limit
+        resp = tbl.scan(**kwargs)
+        return [self._decode_item(i) for i in resp.get("Items", [])]
 
-    def _extract_value(self, field: Dict) -> Any:
-        """Extract value from Data API field response"""
-        if field.get("isNull"):
-            return None
-        elif "booleanValue" in field:
-            return field["booleanValue"]
-        elif "longValue" in field:
-            return field["longValue"]
-        elif "doubleValue" in field:
-            return field["doubleValue"]
-        elif "stringValue" in field:
-            value = field["stringValue"]
-            # Try to parse JSON if it looks like JSON
-            if value and value[0] in ["{", "["]:
-                try:
-                    return json.loads(value)
-                except json.JSONDecodeError:
-                    pass
-            return value
-        elif "blobValue" in field:
-            return field["blobValue"]
-        else:
-            return None
+    # -------------------------
+    # Encoding helpers
+    # -------------------------
+    def _encode_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: self._encode_scalar(v) for k, v in item.items()}
+
+    def _encode_scalar(self, value: Any) -> Any:
+        # DynamoDB requires Decimal for numeric types
+        from decimal import Decimal as _D
+        if isinstance(value, (int, _D)):
+            return value if isinstance(value, _D) else _D(value)
+        if isinstance(value, float):
+            return _D(str(value))
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return value
+
+    def _decode_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        # For our use cases, we only need to ensure Decimals are not present.
+        # boto3 returns native types when using resource client.
+        return item
+
+    # Backward-compat placeholders (no-ops) so existing callers won't break if mistakenly used
+    def execute(self, *_args, **_kwargs):
+        raise NotImplementedError("execute() is not supported for DynamoDB")
+
+    def query(self, *_args, **_kwargs):
+        raise NotImplementedError("query(sql) is not supported for DynamoDB")
+
+    def query_one(self, *_args, **_kwargs):
+        raise NotImplementedError("query_one(sql) is not supported for DynamoDB")
+
+    def insert(self, *_args, **_kwargs):
+        raise NotImplementedError("insert(sql) is not supported for DynamoDB")
+
+    def update(self, *_args, **_kwargs):
+        raise NotImplementedError("update(sql) is not supported for DynamoDB")
+
+    def delete(self, *_args, **_kwargs):
+        raise NotImplementedError("delete(sql) is not supported for DynamoDB")
+
+    def begin_transaction(self, *_args, **_kwargs):
+        raise NotImplementedError("Transactions are not supported in DynamoDB client")
+
+    def commit_transaction(self, *_args, **_kwargs):
+        raise NotImplementedError("Transactions are not supported in DynamoDB client")
+
+    def rollback_transaction(self, *_args, **_kwargs):
+        raise NotImplementedError("Transactions are not supported in DynamoDB client")
+
+    def _build_parameters(self, *_args, **_kwargs):
+        raise NotImplementedError
+
+    def _extract_value(self, *_args, **_kwargs):
+        raise NotImplementedError

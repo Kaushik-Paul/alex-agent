@@ -3,14 +3,10 @@ variable "aws_region" {
   type        = string
 }
 
-variable "aurora_cluster_arn" {
-  description = "ARN of the Aurora cluster from Part 5"
+variable "db_table_prefix" {
+  description = "Prefix for DynamoDB tables (from Part 5 outputs)"
   type        = string
-}
-
-variable "aurora_secret_arn" {
-  description = "ARN of the Secrets Manager secret from Part 5"
-  type        = string
+  default     = "alex_"
 }
 
 variable "vector_bucket" {

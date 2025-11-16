@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.5"
-    }
   }
   
   # Using local backend - state will be stored in terraform.tfstate in this directory
@@ -20,210 +16,150 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Data source for current caller identity
+# Data sources
 data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  project = "alex"
+  part    = "5"
+}
 
 # ========================================
-# Aurora Serverless v2 PostgreSQL Cluster
+# DynamoDB Tables (On-Demand)
 # ========================================
 
-# Random password for database
-resource "random_password" "db_password" {
-  length  = 32
-  special = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
-}
+resource "aws_dynamodb_table" "users" {
+  name         = "${var.db_table_prefix}users"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "clerk_user_id"
 
-# Secrets Manager secret for database credentials
-resource "aws_secretsmanager_secret" "db_credentials" {
-  name                    = "alex-aurora-credentials-${random_id.suffix.hex}"
-  recovery_window_in_days = 0  # For development - immediate deletion
-  
+  attribute {
+    name = "clerk_user_id"
+    type = "S"
+  }
+
   tags = {
-    Project = "alex"
-    Part    = "5"
+    Project = local.project
+    Part    = local.part
   }
 }
 
-resource "random_id" "suffix" {
-  byte_length = 4
-}
+resource "aws_dynamodb_table" "instruments" {
+  name         = "${var.db_table_prefix}instruments"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "symbol"
 
-resource "aws_secretsmanager_secret_version" "db_credentials" {
-  secret_id = aws_secretsmanager_secret.db_credentials.id
-  secret_string = jsonencode({
-    username = "alexadmin"
-    password = random_password.db_password.result
-  })
-}
-
-# DB Subnet Group (using default VPC)
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+  attribute {
+    name = "symbol"
+    type = "S"
   }
-}
+  attribute {
+    name = "instrument_type"
+    type = "S"
+  }
 
-resource "aws_db_subnet_group" "aurora" {
-  name       = "alex-aurora-subnet-group"
-  subnet_ids = data.aws_subnets.default.ids
-  
+  global_secondary_index {
+    name               = "instrument_type-index"
+    hash_key           = "instrument_type"
+    projection_type    = "ALL"
+  }
+
   tags = {
-    Project = "alex"
-    Part    = "5"
+    Project = local.project
+    Part    = local.part
   }
 }
 
-# Security group for Aurora
-resource "aws_security_group" "aurora" {
-  name        = "alex-aurora-sg"
-  description = "Security group for Alex Aurora cluster"
-  vpc_id      = data.aws_vpc.default.id
-  
-  # Allow PostgreSQL access from within VPC
-  ingress {
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = [data.aws_vpc.default.cidr_block]
+resource "aws_dynamodb_table" "accounts" {
+  name         = "${var.db_table_prefix}accounts"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
   }
-  
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  attribute {
+    name = "clerk_user_id"
+    type = "S"
   }
-  
+  attribute {
+    name = "created_at"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "clerk_user_id-index"
+    hash_key           = "clerk_user_id"
+    range_key          = "created_at"
+    projection_type    = "ALL"
+  }
+
   tags = {
-    Project = "alex"
-    Part    = "5"
+    Project = local.project
+    Part    = local.part
   }
 }
 
-# Aurora Serverless v2 Cluster
-resource "aws_rds_cluster" "aurora" {
-  cluster_identifier     = "alex-aurora-cluster"
-  engine                 = "aurora-postgresql"
-  engine_mode            = "provisioned"
-  engine_version         = "15.12"
-  database_name          = "alex"
-  master_username        = "alexadmin"
-  master_password        = random_password.db_password.result
-  
-  # Serverless v2 scaling configuration
-  serverlessv2_scaling_configuration {
-    min_capacity = var.min_capacity
-    max_capacity = var.max_capacity
+resource "aws_dynamodb_table" "positions" {
+  name         = "${var.db_table_prefix}positions"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
   }
-  
-  # Enable Data API
-  enable_http_endpoint = true
-  
-  # Networking
-  db_subnet_group_name   = aws_db_subnet_group.aurora.name
-  vpc_security_group_ids = [aws_security_group.aurora.id]
-  
-  # Backup and maintenance
-  backup_retention_period   = 7
-  preferred_backup_window   = "03:00-04:00"
-  preferred_maintenance_window = "sun:04:00-sun:05:00"
-  
-  # Development settings
-  skip_final_snapshot = true
-  apply_immediately   = true
-  
+  attribute {
+    name = "account_id"
+    type = "S"
+  }
+  attribute {
+    name = "symbol"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "account_id-symbol-index"
+    hash_key           = "account_id"
+    range_key          = "symbol"
+    projection_type    = "ALL"
+  }
+
   tags = {
-    Project = "alex"
-    Part    = "5"
+    Project = local.project
+    Part    = local.part
   }
 }
 
-# Aurora Serverless v2 Instance
-resource "aws_rds_cluster_instance" "aurora" {
-  identifier          = "alex-aurora-instance-1"
-  cluster_identifier  = aws_rds_cluster.aurora.id
-  instance_class      = "db.serverless"
-  engine              = aws_rds_cluster.aurora.engine
-  engine_version      = aws_rds_cluster.aurora.engine_version
-  
-  performance_insights_enabled = false  # Save costs in development
-  
+resource "aws_dynamodb_table" "jobs" {
+  name         = "${var.db_table_prefix}jobs"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+  attribute {
+    name = "clerk_user_id"
+    type = "S"
+  }
+  attribute {
+    name = "created_at"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "user-index"
+    hash_key           = "clerk_user_id"
+    range_key          = "created_at"
+    projection_type    = "ALL"
+  }
+
   tags = {
-    Project = "alex"
-    Part    = "5"
+    Project = local.project
+    Part    = local.part
   }
-}
-
-# IAM role for Lambda to access Aurora Data API
-resource "aws_iam_role" "lambda_aurora_role" {
-  name = "alex-lambda-aurora-role"
-  
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-      }
-    ]
-  })
-  
-  tags = {
-    Project = "alex"
-    Part    = "5"
-  }
-}
-
-# IAM policy for Data API access
-resource "aws_iam_role_policy" "lambda_aurora_policy" {
-  name = "alex-lambda-aurora-policy"
-  role = aws_iam_role.lambda_aurora_role.id
-  
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "rds-data:ExecuteStatement",
-          "rds-data:BatchExecuteStatement",
-          "rds-data:BeginTransaction",
-          "rds-data:CommitTransaction",
-          "rds-data:RollbackTransaction"
-        ]
-        Resource = aws_rds_cluster.aurora.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = aws_secretsmanager_secret.db_credentials.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:*"
-      }
-    ]
-  })
-}
-
-# Attach basic Lambda execution role
-resource "aws_iam_role_policy_attachment" "lambda_basic" {
-  role       = aws_iam_role.lambda_aurora_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }

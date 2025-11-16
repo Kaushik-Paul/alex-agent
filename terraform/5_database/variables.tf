@@ -3,14 +3,8 @@ variable "aws_region" {
   type        = string
 }
 
-variable "min_capacity" {
-  description = "Minimum capacity for Aurora Serverless v2 (in ACUs)"
-  type        = number
-  default     = 0.5
-}
-
-variable "max_capacity" {
-  description = "Maximum capacity for Aurora Serverless v2 (in ACUs)"
-  type        = number
-  default     = 1
+variable "db_table_prefix" {
+  description = "Prefix for DynamoDB table names"
+  type        = string
+  default     = "alex_"
 }

@@ -166,18 +166,13 @@ async def get_or_create_user(
         token_data = creds.decoded
         display_name = token_data.get('name') or token_data.get('email', '').split('@')[0] or "New User"
 
-        # Create user with ALL defaults in one operation
-        user_data = {
-            'clerk_user_id': clerk_user_id,
-            'display_name': display_name,
-            'years_until_retirement': 20,
-            'target_retirement_income': 60000,
-            'asset_class_targets': {"equity": 70, "fixed_income": 30},
-            'region_targets': {"north_america": 50, "international": 50}
-        }
-
-        # Insert directly with all data
-        created_clerk_id = db.users.db.insert('users', user_data, returning='clerk_user_id')
+        # Create user with ALL defaults in one operation (DynamoDB)
+        db.users.create_user(
+            clerk_user_id=clerk_user_id,
+            display_name=display_name,
+            years_until_retirement=20,
+            target_retirement_income=Decimal('60000')
+        )
 
         # Fetch the created user
         created_user = db.users.find_by_clerk_id(clerk_user_id)
@@ -203,13 +198,8 @@ async def update_user(user_update: UserUpdate, clerk_user_id: str = Depends(get_
         # Update user - users table uses clerk_user_id as primary key
         update_data = user_update.model_dump(exclude_unset=True)
 
-        # Use the database client directly since users table has clerk_user_id as PK
-        db.users.db.update(
-            'users',
-            update_data,
-            "clerk_user_id = :clerk_user_id",
-            {'clerk_user_id': clerk_user_id}
-        )
+        # Update user by primary key (DynamoDB)
+        db.users.update_by_clerk_id(clerk_user_id, update_data)
 
         # Return updated user
         updated_user = db.users.find_by_clerk_id(clerk_user_id)

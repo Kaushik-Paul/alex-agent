@@ -1,44 +1,44 @@
 #!/usr/bin/env python3
 """
-Database Reset Script
-Drops all tables, recreates schema, and loads seed data
+Database Reset Script (DynamoDB)
+Purges all items, ensures tables/GSIs, and loads seed data
 """
 
 import sys
 import argparse
 from pathlib import Path
-from src.client import DataAPIClient
+import boto3
 from src.models import Database
 from src.schemas import UserCreate, AccountCreate, PositionCreate
 from decimal import Decimal
 
 
-def drop_all_tables(db: DataAPIClient):
-    """Drop all tables in correct order (respecting foreign keys)"""
-    print("🗑️  Dropping existing tables...")
-    
-    # Order matters due to foreign key constraints
-    tables_to_drop = [
-        'positions',
-        'accounts',
-        'jobs',
-        'instruments',
-        'users'
-    ]
-    
-    for table in tables_to_drop:
+def purge_all_tables(db_models: Database):
+    """Delete all items from all DynamoDB tables (idempotent)."""
+    print("🗑️  Purging all DynamoDB tables...")
+    dynamo = db_models.client  # DynamoClient
+    # Define primary keys per table
+    pk_map = {
+        'users': 'clerk_user_id',
+        'instruments': 'symbol',
+        'accounts': 'id',
+        'positions': 'id',
+        'jobs': 'id',
+    }
+    for table_name, pk in [('positions', 'id'), ('accounts', 'id'), ('jobs', 'id'), ('instruments', 'symbol'), ('users', 'clerk_user_id')]:
+        tbl = dynamo.table(table_name)
         try:
-            db.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
-            print(f"   ✅ Dropped {table}")
+            # Scan and batch delete
+            items = tbl.scan().get('Items', [])
+            if not items:
+                print(f"   ℹ️  {dynamo.tables[table_name]} already empty")
+                continue
+            with tbl.batch_writer() as batch:
+                for item in items:
+                    batch.delete_item(Key={pk: item[pk]})
+            print(f"   ✅ Purged {len(items)} items from {dynamo.tables[table_name]}")
         except Exception as e:
-            print(f"   ⚠️  Error dropping {table}: {e}")
-    
-    # Also drop the function
-    try:
-        db.execute("DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE")
-        print(f"   ✅ Dropped update_updated_at_column function")
-    except Exception as e:
-        print(f"   ⚠️  Error dropping function: {e}")
+            print(f"   ⚠️  Error purging {dynamo.tables[table_name]}: {e}")
 
 
 def create_test_data(db_models: Database):
@@ -149,16 +149,17 @@ def main():
                        help='Skip dropping tables (just reload data)')
     args = parser.parse_args()
     
-    print("🚀 Database Reset Script")
+    print("🚀 Database Reset Script (DynamoDB)")
     print("=" * 50)
     
     # Initialize database
-    db = DataAPIClient()
     db_models = Database()
     
+    if not args.with_test_data:
+        pass
     if not args.skip_drop:
-        # Drop all tables
-        drop_all_tables(db)
+        # Purge all tables
+        purge_all_tables(db_models)
         
         # Run migrations
         print("\n📝 Running migrations...")
@@ -196,13 +197,13 @@ def main():
     
     # Final verification
     print("\n🔍 Final verification...")
-    
-    # Count records
     tables = ['users', 'instruments', 'accounts', 'positions', 'jobs']
-    for table in tables:
-        result = db.query(f"SELECT COUNT(*) as count FROM {table}")
-        count = result[0]['count'] if result else 0
-        print(f"   • {table}: {count} records")
+    for t in tables:
+        try:
+            count = len(db_models.client.scan(t)) if hasattr(db_models.client, 'scan') else len(db_models.client.table(t).scan().get('Items', []))
+        except Exception:
+            count = len(db_models.client.table(t).scan().get('Items', []))
+        print(f"   • {t}: {count} records")
     
     print("\n" + "=" * 50)
     print("✅ Database reset complete!")
