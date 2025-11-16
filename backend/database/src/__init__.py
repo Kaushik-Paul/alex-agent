@@ -1,9 +1,9 @@
 """
 Database package for Alex Financial Planner
-Provides database models, schemas, and Data API client
+Provides database models, schemas, and DynamoDB client
 """
 
-from .client import DataAPIClient
+from .client import DynamoClient
 from .models import Database
 from .schemas import (
     # Types
@@ -31,7 +31,7 @@ from .schemas import (
 
 __all__ = [
     'Database',
-    'DataAPIClient',
+    'DynamoClient',
     'InstrumentCreate',
     'UserCreate',
     'AccountCreate',

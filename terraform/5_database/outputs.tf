@@ -1,65 +1,59 @@
-output "aurora_cluster_arn" {
-  description = "ARN of the Aurora cluster"
-  value       = aws_rds_cluster.aurora.arn
+output "db_table_prefix" {
+  description = "Prefix for DynamoDB tables"
+  value       = var.db_table_prefix
 }
 
-output "aurora_cluster_endpoint" {
-  description = "Writer endpoint for the Aurora cluster"
-  value       = aws_rds_cluster.aurora.endpoint
+output "users_table_arn" {
+  description = "ARN of DynamoDB users table"
+  value       = aws_dynamodb_table.users.arn
 }
 
-output "aurora_secret_arn" {
-  description = "ARN of the Secrets Manager secret containing database credentials"
-  value       = aws_secretsmanager_secret.db_credentials.arn
+output "instruments_table_arn" {
+  description = "ARN of DynamoDB instruments table"
+  value       = aws_dynamodb_table.instruments.arn
 }
 
-output "database_name" {
-  description = "Name of the database"
-  value       = aws_rds_cluster.aurora.database_name
+output "accounts_table_arn" {
+  description = "ARN of DynamoDB accounts table"
+  value       = aws_dynamodb_table.accounts.arn
 }
 
-output "lambda_role_arn" {
-  description = "ARN of the IAM role for Lambda functions to access Aurora"
-  value       = aws_iam_role.lambda_aurora_role.arn
+output "positions_table_arn" {
+  description = "ARN of DynamoDB positions table"
+  value       = aws_dynamodb_table.positions.arn
 }
 
-output "data_api_enabled" {
-  description = "Status of Data API"
-  value       = aws_rds_cluster.aurora.enable_http_endpoint ? "Enabled" : "Disabled"
+output "jobs_table_arn" {
+  description = "ARN of DynamoDB jobs table"
+  value       = aws_dynamodb_table.jobs.arn
 }
 
 output "setup_instructions" {
   description = "Instructions for setting up the database"
   value = <<-EOT
     
-    ✅ Aurora Serverless v2 cluster deployed successfully!
+    ✅ DynamoDB tables deployed successfully!
     
-    Database Details:
-    - Cluster: ${aws_rds_cluster.aurora.cluster_identifier}
-    - Database: ${aws_rds_cluster.aurora.database_name}
-    - Data API: Enabled
+    Tables (prefix: ${var.db_table_prefix}):
+    - Users:       ${aws_dynamodb_table.users.name}
+    - Instruments: ${aws_dynamodb_table.instruments.name}
+    - Accounts:    ${aws_dynamodb_table.accounts.name}
+    - Positions:   ${aws_dynamodb_table.positions.name}
+    - Jobs:        ${aws_dynamodb_table.jobs.name}
     
-    Add the following to your .env file:
-    AURORA_CLUSTER_ARN=${aws_rds_cluster.aurora.arn}
-    AURORA_SECRET_ARN=${aws_secretsmanager_secret.db_credentials.arn}
+    Add the following to your .env file (used by backend and agents):
+    DB_TABLE_PREFIX=${var.db_table_prefix}
+    DEFAULT_AWS_REGION=${data.aws_region.current.name}
     
-    Test the Data API connection:
-    aws rds-data execute-statement \
-      --resource-arn ${aws_rds_cluster.aurora.arn} \
-      --secret-arn ${aws_secretsmanager_secret.db_credentials.arn} \
-      --database alex \
-      --sql "SELECT version()"
-    
-    To set up the database schema:
+    Initialize tables (idempotent):
     cd backend/database
-    uv run migrate.py
+    uv run run_migrations.py
     
-    To load sample data:
-    uv run reset_db.py --with-test-data
+    Load seed data:
+    uv run seed_data.py
     
     💰 Cost Management:
-    - Current scaling: ${var.min_capacity} - ${var.max_capacity} ACUs
-    - Estimated cost: ~$43/month minimum
-    - To pause: Set min_capacity to 0 (cluster will pause after 5 minutes of inactivity)
+    - Using PAY_PER_REQUEST billing mode (on-demand)
+    - Tables scale automatically with usage; near-zero idle cost
   EOT
 }

@@ -1,31 +1,19 @@
 #!/usr/bin/env python3
 """
 Seed data for Alex Financial Planner
-Loads 20+ popular ETF instruments with allocation data
+Loads 20+ popular ETF instruments with allocation data into DynamoDB
 """
 
 import os
 import json
-import boto3
 from botocore.exceptions import ClientError
 from src.schemas import InstrumentCreate
 from pydantic import ValidationError
 from dotenv import load_dotenv
+from src import Database
 
 # Load environment variables
 load_dotenv(override=True)
-
-# Get config from environment
-cluster_arn = os.environ.get("AURORA_CLUSTER_ARN")
-secret_arn = os.environ.get("AURORA_SECRET_ARN")
-database = os.environ.get("AURORA_DATABASE", "alex")
-region = os.environ.get("DEFAULT_AWS_REGION", "us-east-1")
-
-if not cluster_arn or not secret_arn:
-    print("❌ Missing AURORA_CLUSTER_ARN or AURORA_SECRET_ARN in .env file")
-    exit(1)
-
-client = boto3.client("rds-data", region_name=region)
 
 # Define popular ETF instruments with realistic allocation data
 # All percentages should sum to 100 for each allocation type
@@ -348,67 +336,17 @@ INSTRUMENTS = [
 ]
 
 
-def insert_instrument(instrument_data):
-    """Insert a single instrument into the database with Pydantic validation"""
-    # Validate with Pydantic first
+def insert_instrument(db: Database, instrument_data):
+    """Insert a single instrument into DynamoDB with Pydantic validation"""
     try:
         instrument = InstrumentCreate(**instrument_data)
+        db.instruments.create_instrument(instrument)
+        return True
     except ValidationError as e:
         print(f"    ❌ Validation error: {e}")
         return False
-
-    # Get validated data
-    validated = instrument.model_dump()
-
-    sql = """
-        INSERT INTO instruments (
-            symbol, name, instrument_type, current_price,
-            allocation_regions, allocation_sectors, allocation_asset_class
-        ) VALUES (
-            :symbol, :name, :instrument_type, :current_price::numeric,
-            :allocation_regions::jsonb, :allocation_sectors::jsonb, :allocation_asset_class::jsonb
-        )
-        ON CONFLICT (symbol) DO UPDATE SET
-            name = EXCLUDED.name,
-            instrument_type = EXCLUDED.instrument_type,
-            current_price = EXCLUDED.current_price,
-            allocation_regions = EXCLUDED.allocation_regions,
-            allocation_sectors = EXCLUDED.allocation_sectors,
-            allocation_asset_class = EXCLUDED.allocation_asset_class,
-            updated_at = NOW()
-    """
-
-    try:
-        response = client.execute_statement(
-            resourceArn=cluster_arn,
-            secretArn=secret_arn,
-            database=database,
-            sql=sql,
-            parameters=[
-                {"name": "symbol", "value": {"stringValue": validated["symbol"]}},
-                {"name": "name", "value": {"stringValue": validated["name"]}},
-                {"name": "instrument_type", "value": {"stringValue": validated["instrument_type"]}},
-                {
-                    "name": "current_price",
-                    "value": {"stringValue": str(validated.get("current_price", 0))},
-                },
-                {
-                    "name": "allocation_regions",
-                    "value": {"stringValue": json.dumps(validated["allocation_regions"])},
-                },
-                {
-                    "name": "allocation_sectors",
-                    "value": {"stringValue": json.dumps(validated["allocation_sectors"])},
-                },
-                {
-                    "name": "allocation_asset_class",
-                    "value": {"stringValue": json.dumps(validated["allocation_asset_class"])},
-                },
-            ],
-        )
-        return True
-    except ClientError as e:
-        print(f"    ❌ Error: {e.response['Error']['Message'][:100]}")
+    except Exception as e:
+        print(f"    ❌ Error: {e}")
         return False
 
 
@@ -447,7 +385,10 @@ def main():
 
     print("  ✅ All allocations valid!")
 
-    # Insert instruments
+    # Initialize database
+    db = Database()
+
+    # Insert instruments into DynamoDB
     print("\n💾 Inserting instruments...")
     success_count = 0
 
@@ -455,7 +396,7 @@ def main():
         print(
             f"  [{success_count + 1}/{len(INSTRUMENTS)}] {inst['symbol']}: {inst['name'][:40]}..."
         )
-        if insert_instrument(inst):
+        if insert_instrument(db, inst):
             print(f"    ✅ Success")
             success_count += 1
         else:
@@ -464,39 +405,21 @@ def main():
     print("\n" + "=" * 50)
     print(f"Seeding complete: {success_count}/{len(INSTRUMENTS)} instruments loaded")
 
-    # Verify by querying
+    # Verify by querying DynamoDB
     print("\n🔍 Verifying data...")
     try:
-        response = client.execute_statement(
-            resourceArn=cluster_arn,
-            secretArn=secret_arn,
-            database=database,
-            sql="SELECT COUNT(*) as count FROM instruments",
-        )
-        count = response["records"][0][0]["longValue"]
-        print(f"  Database now contains {count} instruments")
-
-        # Show a sample
-        response = client.execute_statement(
-            resourceArn=cluster_arn,
-            secretArn=secret_arn,
-            database=database,
-            sql="SELECT symbol, name FROM instruments ORDER BY symbol LIMIT 5",
-        )
-
+        instruments = db.instruments.find_all(limit=5)
+        print(f"  Database now contains at least {success_count} instruments (sample below)")
         print("\n  Sample instruments:")
-        for record in response["records"]:
-            symbol = record[0]["stringValue"]
-            name = record[1]["stringValue"]
-            print(f"    - {symbol}: {name}")
-
-    except ClientError as e:
+        for rec in instruments:
+            print(f"    - {rec.get('symbol')}: {rec.get('name')}")
+    except Exception as e:
         print(f"  ❌ Error verifying: {e}")
 
     print("\n✅ Seed data loaded successfully!")
     print("\n📝 Next steps:")
-    print("1. Create test user and portfolio: uv run create_test_data.py")
-    print("2. Test database operations: uv run test_db.py")
+    print("1. Create test user and portfolio: uv run reset_db.py --with-test-data --skip-drop")
+    print("2. Test database operations: uv run verify_database.py")
 
 
 if __name__ == "__main__":

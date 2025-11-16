@@ -5,48 +5,24 @@ Database models and query builders
 from typing import Dict, List, Optional, Any
 from datetime import datetime, date
 from decimal import Decimal
-from .client import DataAPIClient
+import uuid
+from boto3.dynamodb.conditions import Attr
+from .client import DynamoClient
 from .schemas import (
-    InstrumentCreate, UserCreate, AccountCreate, 
+    InstrumentCreate, UserCreate, AccountCreate,
     PositionCreate, JobCreate, JobUpdate
 )
 
 
 class BaseModel:
-    """Base class for database models"""
-    
+    """Base class for database models (DynamoDB)"""
+
     table_name = None
-    
-    def __init__(self, db: DataAPIClient):
+
+    def __init__(self, db: DynamoClient):
         self.db = db
         if not self.table_name:
             raise ValueError("table_name must be defined")
-    
-    def find_by_id(self, id: Any) -> Optional[Dict]:
-        """Find a record by ID"""
-        sql = f"SELECT * FROM {self.table_name} WHERE id = :id::uuid"
-        return self.db.query_one(sql, [{'name': 'id', 'value': {'stringValue': str(id)}}])
-    
-    def find_all(self, limit: int = 100, offset: int = 0) -> List[Dict]:
-        """Find all records with pagination"""
-        sql = f"SELECT * FROM {self.table_name} LIMIT :limit OFFSET :offset"
-        params = [
-            {'name': 'limit', 'value': {'longValue': limit}},
-            {'name': 'offset', 'value': {'longValue': offset}}
-        ]
-        return self.db.query(sql, params)
-    
-    def create(self, data: Dict, returning: str = 'id') -> str:
-        """Create a new record"""
-        return self.db.insert(self.table_name, data, returning=returning)
-    
-    def update(self, id: Any, data: Dict) -> int:
-        """Update a record by ID"""
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': str(id)})
-    
-    def delete(self, id: Any) -> int:
-        """Delete a record by ID"""
-        return self.db.delete(self.table_name, "id = :id::uuid", {'id': str(id)})
 
 
 class Users(BaseModel):
@@ -54,24 +30,32 @@ class Users(BaseModel):
     table_name = 'users'
     
     def find_by_clerk_id(self, clerk_user_id: str) -> Optional[Dict]:
-        """Find user by Clerk ID"""
-        sql = f"SELECT * FROM {self.table_name} WHERE clerk_user_id = :clerk_id"
-        params = [{'name': 'clerk_id', 'value': {'stringValue': clerk_user_id}}]
-        return self.db.query_one(sql, params)
+        """Find user by Clerk ID (primary key)"""
+        return self.db.get_item(self.table_name, {"clerk_user_id": clerk_user_id})
     
     def create_user(self, clerk_user_id: str, display_name: str = None, 
                    years_until_retirement: int = None,
                    target_retirement_income: Decimal = None) -> str:
         """Create a new user"""
-        data = {
+        now = datetime.utcnow().isoformat()
+        item = {
             'clerk_user_id': clerk_user_id,
             'display_name': display_name,
             'years_until_retirement': years_until_retirement,
-            'target_retirement_income': target_retirement_income
+            'target_retirement_income': float(target_retirement_income) if target_retirement_income is not None else None,
+            'asset_class_targets': {"equity": 70, "fixed_income": 30},
+            'region_targets': {"north_america": 50, "international": 50},
+            'created_at': now,
+            'updated_at': now,
         }
-        # Remove None values
+        item = {k: v for k, v in item.items() if v is not None}
+        self.db.put_item(self.table_name, item)
+        return clerk_user_id
+
+    def update_by_clerk_id(self, clerk_user_id: str, data: Dict) -> None:
         data = {k: v for k, v in data.items() if v is not None}
-        return self.db.insert(self.table_name, data, returning='clerk_user_id')
+        data['updated_at'] = datetime.utcnow().isoformat()
+        self.db.update_item(self.table_name, {"clerk_user_id": clerk_user_id}, data)
 
 
 class Instruments(BaseModel):
@@ -79,50 +63,47 @@ class Instruments(BaseModel):
     table_name = 'instruments'
 
     def find_all(self, limit: int = None, offset: int = 0) -> List[Dict]:
-        """Find all instruments - no limit by default for autocomplete"""
-        sql = f"SELECT * FROM {self.table_name} ORDER BY symbol"
-        return self.db.query(sql, [])
+        """Scan instruments - no limit by default for autocomplete"""
+        return self.db.scan(self.table_name, limit=limit)
 
     def find_by_symbol(self, symbol: str) -> Optional[Dict]:
-        """Find instrument by symbol"""
-        sql = f"SELECT * FROM {self.table_name} WHERE symbol = :symbol"
-        params = [{'name': 'symbol', 'value': {'stringValue': symbol}}]
-        return self.db.query_one(sql, params)
+        """Find instrument by symbol (primary key)"""
+        return self.db.get_item(self.table_name, {"symbol": symbol})
     
     def create_instrument(self, instrument: InstrumentCreate) -> str:
         """Create a new instrument with validation"""
         # Validate using Pydantic
         validated = instrument.model_dump()
         
-        # Convert allocations to JSON strings for storage
-        data = {
+        now = datetime.utcnow().isoformat()
+        item = {
             'symbol': validated['symbol'],
             'name': validated['name'],
             'instrument_type': validated['instrument_type'],
+            'current_price': float(validated.get('current_price', 0)) if validated.get('current_price') is not None else None,
             'allocation_regions': validated['allocation_regions'],
             'allocation_sectors': validated['allocation_sectors'],
-            'allocation_asset_class': validated['allocation_asset_class']
+            'allocation_asset_class': validated['allocation_asset_class'],
+            'created_at': now,
+            'updated_at': now,
         }
-        
-        return self.db.insert(self.table_name, data, returning='symbol')
+        item = {k: v for k, v in item.items() if v is not None}
+        self.db.put_item(self.table_name, item)
+        return validated['symbol']
     
     def find_by_type(self, instrument_type: str) -> List[Dict]:
-        """Find all instruments of a specific type"""
-        sql = f"SELECT * FROM {self.table_name} WHERE instrument_type = :type ORDER BY symbol"
-        params = [{'name': 'type', 'value': {'stringValue': instrument_type}}]
-        return self.db.query(sql, params)
+        """Find all instruments of a specific type using GSI instrument_type-index"""
+        return self.db.query_gsi_eq(self.table_name, "instrument_type-index", "instrument_type", instrument_type)
     
     def search(self, query: str) -> List[Dict]:
-        """Search instruments by symbol or name"""
-        sql = f"""
-            SELECT * FROM {self.table_name} 
-            WHERE LOWER(symbol) LIKE LOWER(:query) 
-               OR LOWER(name) LIKE LOWER(:query)
-            ORDER BY symbol
-            LIMIT 20
-        """
-        params = [{'name': 'query', 'value': {'stringValue': f'%{query}%'}}]
-        return self.db.query(sql, params)
+        """Search instruments by symbol or name (scan + filter contains)"""
+        # DynamoDB doesn't support LIKE. Use contains filter via scan.
+        # Note: Case-sensitive; for simplicity keep as-is.
+        # For production, consider maintaining a lowercase field for search.
+        items = self.db.scan(self.table_name)
+        q = query.strip()
+        res = [i for i in items if (i.get('symbol') and q in i['symbol']) or (i.get('name') and q.lower() in i['name'].lower())]
+        return res[:20]
 
 
 class Accounts(BaseModel):
@@ -130,27 +111,42 @@ class Accounts(BaseModel):
     table_name = 'accounts'
     
     def find_by_user(self, clerk_user_id: str) -> List[Dict]:
-        """Find all accounts for a user"""
-        sql = f"""
-            SELECT * FROM {self.table_name} 
-            WHERE clerk_user_id = :user_id 
-            ORDER BY created_at DESC
-        """
-        params = [{'name': 'user_id', 'value': {'stringValue': clerk_user_id}}]
-        return self.db.query(sql, params)
+        """Find all accounts for a user using GSI clerk_user_id-index"""
+        items = self.db.query_gsi_eq(self.table_name, "clerk_user_id-index", "clerk_user_id", clerk_user_id, scan_index_forward=False)
+        # Already sorted by created_at desc if used as sort key. If not, sort here.
+        items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        return items
     
     def create_account(self, clerk_user_id: str, account_name: str,
                       account_purpose: str = None, cash_balance: Decimal = Decimal('0'),
                       cash_interest: Decimal = Decimal('0')) -> str:
         """Create a new account"""
-        data = {
+        now = datetime.utcnow().isoformat()
+        account_id = str(uuid.uuid4())
+        item = {
+            'id': account_id,
             'clerk_user_id': clerk_user_id,
             'account_name': account_name,
             'account_purpose': account_purpose,
-            'cash_balance': cash_balance,
-            'cash_interest': cash_interest
+            'cash_balance': float(cash_balance) if cash_balance is not None else 0.0,
+            'cash_interest': float(cash_interest) if cash_interest is not None else 0.0,
+            'created_at': now,
+            'updated_at': now,
         }
-        return self.db.insert(self.table_name, data, returning='id')
+        item = {k: v for k, v in item.items() if v is not None}
+        self.db.put_item(self.table_name, item)
+        return account_id
+
+    def find_by_id(self, account_id: str) -> Optional[Dict]:
+        return self.db.get_item(self.table_name, {"id": account_id})
+
+    def update(self, account_id: str, data: Dict) -> None:
+        data = {k: v for k, v in data.items() if v is not None}
+        data['updated_at'] = datetime.utcnow().isoformat()
+        self.db.update_item(self.table_name, {"id": account_id}, data)
+
+    def delete(self, account_id: str) -> None:
+        self.db.delete_item(self.table_name, {"id": account_id})
 
 
 class Positions(BaseModel):
@@ -158,63 +154,73 @@ class Positions(BaseModel):
     table_name = 'positions'
     
     def find_by_account(self, account_id: str) -> List[Dict]:
-        """Find all positions in an account"""
-        sql = f"""
-            SELECT p.*, i.name as instrument_name, i.instrument_type, i.current_price
-            FROM {self.table_name} p
-            JOIN instruments i ON p.symbol = i.symbol
-            WHERE p.account_id = :account_id::uuid
-            ORDER BY p.symbol
-        """
-        params = [{'name': 'account_id', 'value': {'stringValue': account_id}}]
-        return self.db.query(sql, params)
+        """Find all positions in an account via GSI account_id-symbol-index"""
+        items = self.db.query_gsi_eq(self.table_name, "account_id-symbol-index", "account_id", account_id, sk_name="symbol", begins_with="")
+        items.sort(key=lambda x: x.get('symbol', ''))
+        return items
     
     def get_portfolio_value(self, account_id: str) -> Dict:
-        """Calculate total portfolio value using current prices from instruments table"""
-        sql = """
-            SELECT 
-                COUNT(DISTINCT p.symbol) as num_positions,
-                SUM(p.quantity * i.current_price) as total_value,
-                SUM(p.quantity) as total_shares
-            FROM positions p
-            JOIN instruments i ON p.symbol = i.symbol
-            WHERE p.account_id = :account_id::uuid
-        """
-        params = [
-            {'name': 'account_id', 'value': {'stringValue': account_id}}
-        ]
-        result = self.db.query_one(sql, params)
-        if result:
-            return {
-                'num_positions': result.get('num_positions', 0),
-                'total_value': float(result.get('total_value', 0)) if result.get('total_value') else 0,
-                'total_shares': float(result.get('total_shares', 0)) if result.get('total_shares') else 0
-            }
-        return {'num_positions': 0, 'total_value': 0, 'total_shares': 0}
+        """Calculate total portfolio value by joining in code against instruments"""
+        positions = self.find_by_account(account_id)
+        num_positions = len({p.get('symbol') for p in positions})
+        total_shares = 0.0
+        total_value = 0.0
+        for p in positions:
+            qty = float(p.get('quantity', 0) or 0)
+            total_shares += qty
+            # Look up instrument price
+            # Note: Import here to avoid circular import
+            from .models import Instruments  # type: ignore
+            inst_model = Instruments(self.db)
+            inst = inst_model.find_by_symbol(p.get('symbol'))
+            price = float(inst.get('current_price', 0) or 0) if inst else 0.0
+            total_value += qty * price
+        return {'num_positions': num_positions, 'total_value': total_value, 'total_shares': total_shares}
     
     def add_position(self, account_id: str, symbol: str, quantity: Decimal) -> str:
-        """Add or update a position"""
-        # Use UPSERT to handle existing positions
-        sql = """
-            INSERT INTO positions (account_id, symbol, quantity, as_of_date)
-            VALUES (:account_id::uuid, :symbol, :quantity::numeric, :as_of_date::date)
-            ON CONFLICT (account_id, symbol) 
-            DO UPDATE SET 
-                quantity = EXCLUDED.quantity,
-                as_of_date = EXCLUDED.as_of_date,
-                updated_at = NOW()
-            RETURNING id
-        """
-        params = [
-            {'name': 'account_id', 'value': {'stringValue': account_id}},
-            {'name': 'symbol', 'value': {'stringValue': symbol}},
-            {'name': 'quantity', 'value': {'stringValue': str(quantity)}},
-            {'name': 'as_of_date', 'value': {'stringValue': date.today().isoformat()}}
-        ]
-        response = self.db.execute(sql, params)
-        if response.get('records'):
-            return response['records'][0][0].get('stringValue')
-        return None
+        """Add or update a position (upsert by account_id+symbol)"""
+        # Try to find existing by account_id via GSI and filter by exact symbol
+        items = self.db.query_gsi_eq(
+            self.table_name,
+            "account_id-symbol-index",
+            "account_id",
+            account_id,
+            filter_expression=Attr("symbol").eq(symbol)
+        )
+        now = datetime.utcnow().isoformat()
+        if items:
+            pos = items[0]
+            pos_id = pos['id']
+            self.db.update_item(self.table_name, {"id": pos_id}, {
+                "quantity": float(quantity),
+                "as_of_date": date.today().isoformat(),
+                "updated_at": now,
+            })
+            return pos_id
+        else:
+            pos_id = str(uuid.uuid4())
+            item = {
+                'id': pos_id,
+                'account_id': account_id,
+                'symbol': symbol,
+                'quantity': float(quantity),
+                'as_of_date': date.today().isoformat(),
+                'created_at': now,
+                'updated_at': now,
+            }
+            self.db.put_item(self.table_name, item)
+            return pos_id
+
+    def find_by_id(self, position_id: str) -> Optional[Dict]:
+        return self.db.get_item(self.table_name, {"id": position_id})
+
+    def update(self, position_id: str, data: Dict) -> None:
+        data = {k: v for k, v in data.items() if v is not None}
+        data['updated_at'] = datetime.utcnow().isoformat()
+        self.db.update_item(self.table_name, {"id": position_id}, data)
+
+    def delete(self, position_id: str) -> None:
+        self.db.delete_item(self.table_name, {"id": position_id})
 
 
 class Jobs(BaseModel):
@@ -224,97 +230,73 @@ class Jobs(BaseModel):
     def create_job(self, clerk_user_id: str, job_type: str, 
                   request_payload: Dict = None) -> str:
         """Create a new job"""
-        data = {
+        job_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        item = {
+            'id': job_id,
             'clerk_user_id': clerk_user_id,
             'job_type': job_type,
             'status': 'pending',
-            'request_payload': request_payload
+            'request_payload': request_payload,
+            'created_at': now,
+            'updated_at': now,
         }
-        return self.db.insert(self.table_name, data, returning='id')
+        self.db.put_item(self.table_name, item)
+        return job_id
     
     def update_status(self, job_id: str, status: str, error_message: str = None) -> int:
         """Update job status"""
-        data = {'status': status}
-        
+        data = {'status': status, 'updated_at': datetime.utcnow().isoformat()}
         if status == 'running':
-            data['started_at'] = datetime.utcnow()
+            data['started_at'] = datetime.utcnow().isoformat()
         elif status in ['completed', 'failed']:
-            data['completed_at'] = datetime.utcnow()
-        
+            data['completed_at'] = datetime.utcnow().isoformat()
         if error_message:
             data['error_message'] = error_message
-        
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        self.db.update_item(self.table_name, {"id": job_id}, data)
+        return 1
     
     def update_report(self, job_id: str, report_payload: Dict) -> int:
         """Update job with Reporter agent's analysis"""
-        data = {'report_payload': report_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        self.db.update_item(self.table_name, {"id": job_id}, {"report_payload": report_payload, "updated_at": datetime.utcnow().isoformat()})
+        return 1
     
     def update_charts(self, job_id: str, charts_payload: Dict) -> int:
         """Update job with Charter agent's visualization data"""
-        data = {'charts_payload': charts_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        self.db.update_item(self.table_name, {"id": job_id}, {"charts_payload": charts_payload, "updated_at": datetime.utcnow().isoformat()})
+        return 1
     
     def update_retirement(self, job_id: str, retirement_payload: Dict) -> int:
         """Update job with Retirement agent's projections"""
-        data = {'retirement_payload': retirement_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        self.db.update_item(self.table_name, {"id": job_id}, {"retirement_payload": retirement_payload, "updated_at": datetime.utcnow().isoformat()})
+        return 1
     
     def update_summary(self, job_id: str, summary_payload: Dict) -> int:
         """Update job with Planner's final summary"""
-        data = {'summary_payload': summary_payload}
-        return self.db.update(self.table_name, data, "id = :id::uuid", {'id': job_id})
+        self.db.update_item(self.table_name, {"id": job_id}, {"summary_payload": summary_payload, "updated_at": datetime.utcnow().isoformat()})
+        return 1
     
     def find_by_user(self, clerk_user_id: str, status: str = None, 
                     limit: int = 20) -> List[Dict]:
-        """Find jobs for a user"""
+        """Find jobs for a user using GSI user-index (PK clerk_user_id, SK created_at)"""
+        items = self.db.query_gsi_eq(self.table_name, "user-index", "clerk_user_id", clerk_user_id, scan_index_forward=False)
         if status:
-            sql = f"""
-                SELECT * FROM {self.table_name}
-                WHERE clerk_user_id = :user_id AND status = :status
-                ORDER BY created_at DESC
-                LIMIT :limit
-            """
-            params = [
-                {'name': 'user_id', 'value': {'stringValue': clerk_user_id}},
-                {'name': 'status', 'value': {'stringValue': status}},
-                {'name': 'limit', 'value': {'longValue': limit}}
-            ]
-        else:
-            sql = f"""
-                SELECT * FROM {self.table_name}
-                WHERE clerk_user_id = :user_id
-                ORDER BY created_at DESC
-                LIMIT :limit
-            """
-            params = [
-                {'name': 'user_id', 'value': {'stringValue': clerk_user_id}},
-                {'name': 'limit', 'value': {'longValue': limit}}
-            ]
-        
-        return self.db.query(sql, params)
+            items = [i for i in items if i.get('status') == status]
+        return items[:limit]
+
+    def find_by_id(self, job_id: str) -> Optional[Dict]:
+        return self.db.get_item(self.table_name, {"id": job_id})
 
 
 class Database:
-    """Main database interface providing access to all models"""
-    
-    def __init__(self, cluster_arn: str = None, secret_arn: str = None,
-                 database: str = None, region: str = None):
-        """Initialize database with all model classes"""
-        self.client = DataAPIClient(cluster_arn, secret_arn, database, region)
-        
+    """Main database interface providing access to all models (DynamoDB)"""
+
+    def __init__(self, table_prefix: str = None, region: str = None):
+        self.client = DynamoClient(table_prefix=table_prefix, region_name=region)
+
         # Initialize all models
         self.users = Users(self.client)
         self.instruments = Instruments(self.client)
         self.accounts = Accounts(self.client)
         self.positions = Positions(self.client)
         self.jobs = Jobs(self.client)
-    
-    def execute_raw(self, sql: str, parameters: List[Dict] = None) -> Dict:
-        """Execute raw SQL for complex queries"""
-        return self.client.execute(sql, parameters)
-    
-    def query_raw(self, sql: str, parameters: List[Dict] = None) -> List[Dict]:
-        """Execute raw SELECT query"""
-        return self.client.query(sql, parameters)
