@@ -84,7 +84,7 @@ class DynamoClient:
             placeholder = f":v{i}"
             name_placeholder = f"#n{i}"
             update_expr_parts.append(f"{name_placeholder} = {placeholder}")
-            expr_vals[placeholder] = self._encode_scalar(v)
+            expr_vals[placeholder] = self._encode_value(v)
             expr_names[name_placeholder] = k
 
         update_expr = "SET " + ", ".join(update_expr_parts)
@@ -140,7 +140,7 @@ class DynamoClient:
     # Encoding helpers
     # -------------------------
     def _encode_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        return {k: self._encode_scalar(v) for k, v in item.items()}
+        return {k: self._encode_value(v) for k, v in item.items()}
 
     def _encode_scalar(self, value: Any) -> Any:
         # DynamoDB requires Decimal for numeric types
@@ -152,6 +152,13 @@ class DynamoClient:
         if isinstance(value, (datetime, date)):
             return value.isoformat()
         return value
+
+    def _encode_value(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: self._encode_value(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._encode_value(v) for v in value]
+        return self._encode_scalar(value)
 
     def _decode_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         from decimal import Decimal as _D
