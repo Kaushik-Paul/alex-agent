@@ -246,10 +246,10 @@ def create_agent(
 
     model = LitellmModel(model=f"openrouter/{model_id}")
 
-    # Extract user preferences
-    years_until_retirement = user_preferences.get("years_until_retirement", 30)
-    target_income = user_preferences.get("target_retirement_income", 80000)
-    current_age = user_preferences.get("current_age", 40)
+    # Extract user preferences (cast to native types to avoid Decimal usage)
+    years_until_retirement = int(user_preferences.get("years_until_retirement", 30) or 30)
+    target_income = float(user_preferences.get("target_retirement_income", 80000) or 80000)
+    current_age = int(user_preferences.get("current_age", 40) or 40)
 
     # Calculate portfolio metrics
     portfolio_value = calculate_portfolio_value(portfolio_data)

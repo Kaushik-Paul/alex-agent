@@ -154,9 +154,25 @@ class DynamoClient:
         return value
 
     def _decode_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        # For our use cases, we only need to ensure Decimals are not present.
-        # boto3 returns native types when using resource client.
-        return item
+        from decimal import Decimal as _D
+        def _convert(v: Any) -> Any:
+            if isinstance(v, dict):
+                return {k: _convert(x) for k, x in v.items()}
+            if isinstance(v, list):
+                return [_convert(x) for x in v]
+            if isinstance(v, _D):
+                # Preserve ints precisely
+                if v == v.to_integral_value():
+                    try:
+                        return int(v)
+                    except Exception:
+                        return float(v)
+                try:
+                    return float(v)
+                except Exception:
+                    return str(v)
+            return v
+        return _convert(item)
 
     # Backward-compat placeholders (no-ops) so existing callers won't break if mistakenly used
     def execute(self, *_args, **_kwargs):

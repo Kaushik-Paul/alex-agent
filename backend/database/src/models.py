@@ -228,6 +228,14 @@ class Jobs(BaseModel):
     """Jobs table operations"""
     table_name = 'jobs'
     
+    def create(self, data: Dict) -> str:
+        """Compatibility: create a job from dict like tests expect"""
+        return self.create_job(
+            data.get('clerk_user_id'),
+            data.get('job_type'),
+            data.get('request_payload')
+        )
+
     def create_job(self, clerk_user_id: str, job_type: str, 
                   request_payload: Dict = None) -> str:
         """Create a new job"""
@@ -287,6 +295,10 @@ class Jobs(BaseModel):
 
     def find_by_id(self, job_id: str) -> Optional[Dict]:
         return self.db.get_item(self.table_name, {"id": job_id})
+
+    def delete(self, job_id: str) -> None:
+        """Compatibility: delete job by id"""
+        self.db.delete_item(self.table_name, {"id": job_id})
 
 
 class Database:
