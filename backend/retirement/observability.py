@@ -76,7 +76,9 @@ def observe():
                 f"✅ Observability: LangFuse authentication check passed (result: {auth_result})"
             )
         except Exception as auth_error:
-            logger.warning(f"⚠️  Observability: Auth check failed but continuing: {auth_error}")
+            logger.warning(f"⚠️  Observability: Auth check failed, disabling observability for this run: {auth_error}")
+            # Disable client to skip flush + sleep on exit
+            langfuse_client = None
 
         logger.info("🎯 Observability: Setup complete - traces will be sent to LangFuse")
 
