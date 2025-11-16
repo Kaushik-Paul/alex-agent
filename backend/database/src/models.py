@@ -155,7 +155,7 @@ class Positions(BaseModel):
     
     def find_by_account(self, account_id: str) -> List[Dict]:
         """Find all positions in an account via GSI account_id-symbol-index"""
-        items = self.db.query_gsi_eq(self.table_name, "account_id-symbol-index", "account_id", account_id, sk_name="symbol", begins_with="")
+        items = self.db.query_gsi_eq(self.table_name, "account_id-symbol-index", "account_id", account_id)
         items.sort(key=lambda x: x.get('symbol', ''))
         return items
     
@@ -185,7 +185,8 @@ class Positions(BaseModel):
             "account_id-symbol-index",
             "account_id",
             account_id,
-            filter_expression=Attr("symbol").eq(symbol)
+            sk_name="symbol",
+            sk_eq=symbol,
         )
         now = datetime.utcnow().isoformat()
         if items:

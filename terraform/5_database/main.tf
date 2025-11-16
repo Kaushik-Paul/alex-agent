@@ -50,8 +50,14 @@ resource "aws_dynamodb_table" "instruments" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "symbol"
 
-  attribute { name = "symbol"           type = "S" }
-  attribute { name = "instrument_type"  type = "S" }
+  attribute {
+    name = "symbol"
+    type = "S"
+  }
+  attribute {
+    name = "instrument_type"
+    type = "S"
+  }
 
   global_secondary_index {
     name               = "instrument_type-index"
@@ -70,9 +76,18 @@ resource "aws_dynamodb_table" "accounts" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "id"
 
-  attribute { name = "id"            type = "S" }
-  attribute { name = "clerk_user_id" type = "S" }
-  attribute { name = "created_at"    type = "S" }
+  attribute {
+    name = "id"
+    type = "S"
+  }
+  attribute {
+    name = "clerk_user_id"
+    type = "S"
+  }
+  attribute {
+    name = "created_at"
+    type = "S"
+  }
 
   global_secondary_index {
     name               = "clerk_user_id-index"
@@ -92,9 +107,18 @@ resource "aws_dynamodb_table" "positions" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "id"
 
-  attribute { name = "id"         type = "S" }
-  attribute { name = "account_id" type = "S" }
-  attribute { name = "symbol"     type = "S" }
+  attribute {
+    name = "id"
+    type = "S"
+  }
+  attribute {
+    name = "account_id"
+    type = "S"
+  }
+  attribute {
+    name = "symbol"
+    type = "S"
+  }
 
   global_secondary_index {
     name               = "account_id-symbol-index"
@@ -114,9 +138,18 @@ resource "aws_dynamodb_table" "jobs" {
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "id"
 
-  attribute { name = "id"            type = "S" }
-  attribute { name = "clerk_user_id" type = "S" }
-  attribute { name = "created_at"    type = "S" }
+  attribute {
+    name = "id"
+    type = "S"
+  }
+  attribute {
+    name = "clerk_user_id"
+    type = "S"
+  }
+  attribute {
+    name = "created_at"
+    type = "S"
+  }
 
   global_secondary_index {
     name               = "user-index"

@@ -101,9 +101,9 @@ class DynamoClient:
     def query_by_pk(self, logical_table: str, pk_name: str, pk_value: Any, sk_name: Optional[str] = None, sk_begins_with: Optional[str] = None, limit: Optional[int] = None, scan_index_forward: Optional[bool] = None) -> List[Dict[str, Any]]:
         tbl = self.table(logical_table)
         key_cond = Key(pk_name).eq(pk_value)
-        if sk_name and sk_begins_with is not None:
+        if sk_name and sk_begins_with:
             key_cond &= Key(sk_name).begins_with(sk_begins_with)
-        kwargs: Dict[str, Any] = {"KeyConditionExpression": key_cond}
+        kwargs = {"KeyConditionExpression": key_cond}
         if limit:
             kwargs["Limit"] = limit
         if scan_index_forward is not None:
@@ -111,12 +111,14 @@ class DynamoClient:
         resp = tbl.query(**kwargs)
         return [self._decode_item(i) for i in resp.get("Items", [])]
 
-    def query_gsi_eq(self, logical_table: str, index_name: str, key_name: str, key_value: Any, sk_name: Optional[str] = None, begins_with: Optional[str] = None, limit: Optional[int] = None, scan_index_forward: Optional[bool] = None, filter_expression: Optional[Any] = None) -> List[Dict[str, Any]]:
+    def query_gsi_eq(self, logical_table: str, index_name: str, key_name: str, key_value: Any, sk_name: Optional[str] = None, begins_with: Optional[str] = None, sk_eq: Optional[Any] = None, limit: Optional[int] = None, scan_index_forward: Optional[bool] = None, filter_expression: Optional[Any] = None) -> List[Dict[str, Any]]:
         tbl = self.table(logical_table)
         key_cond = Key(key_name).eq(key_value)
-        if sk_name and begins_with is not None:
+        if sk_name and sk_eq is not None:
+            key_cond &= Key(sk_name).eq(sk_eq)
+        elif sk_name and begins_with:
             key_cond &= Key(sk_name).begins_with(begins_with)
-        kwargs: Dict[str, Any] = {"IndexName": index_name, "KeyConditionExpression": key_cond}
+        kwargs = {"IndexName": index_name, "KeyConditionExpression": key_cond}
         if filter_expression is not None:
             kwargs["FilterExpression"] = filter_expression
         if limit:
