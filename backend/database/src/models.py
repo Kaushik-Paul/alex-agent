@@ -53,7 +53,8 @@ class Users(BaseModel):
         return clerk_user_id
 
     def update_by_clerk_id(self, clerk_user_id: str, data: Dict) -> None:
-        data = {k: v for k, v in data.items() if v is not None}
+        # Filter out None and empty-string values (DynamoDB forbids empty strings)
+        data = {k: v for k, v in data.items() if v is not None and not (isinstance(v, str) and v == "")}
         data['updated_at'] = datetime.utcnow().isoformat()
         self.db.update_item(self.table_name, {"clerk_user_id": clerk_user_id}, data)
 
@@ -216,7 +217,8 @@ class Positions(BaseModel):
         return self.db.get_item(self.table_name, {"id": position_id})
 
     def update(self, position_id: str, data: Dict) -> None:
-        data = {k: v for k, v in data.items() if v is not None}
+        # Filter out None and empty-string values (DynamoDB forbids empty strings)
+        data = {k: v for k, v in data.items() if v is not None and not (isinstance(v, str) and v == "")}
         data['updated_at'] = datetime.utcnow().isoformat()
         self.db.update_item(self.table_name, {"id": position_id}, data)
 
