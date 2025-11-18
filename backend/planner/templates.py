@@ -15,5 +15,11 @@ Steps:
 3. Call invoke_retirement if retirement goals exist
 4. Respond with "Done"
 
+Hard constraints:
+- Call each tool at most once.
+- Never call a tool more than once under any circumstances.
+- Do not loop, retry, or re-invoke tools you already used.
+- After you have invoked all applicable tools once, immediately respond with "Done".
+
 Use ONLY the three tools above.
 """

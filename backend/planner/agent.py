@@ -9,6 +9,8 @@ import logging
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from dataclasses import dataclass
+from botocore.exceptions import ClientError
+from src import Database
 
 from agents import function_tool, RunContextWrapper
 from agents.extensions.models.litellm_model import LitellmModel
@@ -84,6 +86,12 @@ def handle_missing_instruments(job_id: str, db) -> None:
         logger.error(f"Job {job_id} not found")
         return
 
+    # Enforce tagger run cap per job
+    tagger_runs = int(job.get("tagger_runs", 0) or 0)
+    if tagger_runs >= 5:
+        logger.info(f"Planner: Tagger run cap reached for job {job_id} (runs={tagger_runs}). Skipping tagging.")
+        return
+
     user_id = job["clerk_user_id"]
     accounts = db.accounts.find_by_user(user_id)
 
@@ -106,6 +114,25 @@ def handle_missing_instruments(job_id: str, db) -> None:
                 missing.append({"symbol": position["symbol"], "name": ""})
 
     if missing:
+        # Limit number of instruments per tagger call to keep runtime tight
+        try:
+            max_per_call = int(os.getenv("TAGGER_MAX_PER_CALL", "12"))
+        except Exception:
+            max_per_call = 12
+        if len(missing) > max_per_call:
+            logger.info(f"Planner: Limiting tagger batch from {len(missing)} to {max_per_call} instruments")
+            missing = missing[:max_per_call]
+
+        # Record this tagger attempt on the job for idempotency
+        try:
+            db.client.update_item(
+                'jobs',
+                {"id": job_id},
+                {"tagger_runs": tagger_runs + 1, "tagger_last_started_at": datetime.utcnow().isoformat()}
+            )
+        except Exception as e:
+            logger.warning(f"Planner: Could not update tagger_runs counter: {e}")
+
         logger.info(
             f"Planner: Found {len(missing)} instruments needing classification: {[m['symbol'] for m in missing]}"
         )
@@ -133,6 +160,11 @@ def handle_missing_instruments(job_id: str, db) -> None:
             logger.error(f"Planner: Error tagging instruments: {e}")
     else:
         logger.info("Planner: All instruments have allocation data")
+        # Mark tagger as completed for this job
+        try:
+            db.client.update_item('jobs', {"id": job_id}, {"tagger_completed": True})
+        except Exception as e:
+            logger.debug(f"Planner: Could not mark tagger_completed: {e}")
 
 
 def load_portfolio_summary(job_id: str, db) -> Dict[str, Any]:
@@ -193,6 +225,31 @@ async def invoke_reporter_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
+    # Single-invocation lock using DynamoDB conditional update
+    try:
+        table = Database().client.table('jobs')
+        now_iso = datetime.utcnow().isoformat()
+        table.update_item(
+            Key={'id': job_id},
+            UpdateExpression='SET reporter_started_at = if_not_exists(reporter_started_at, :t), reporter_invocations = if_not_exists(reporter_invocations, :zero) + :one',
+            ConditionExpression='attribute_not_exists(reporter_started_at)',
+            ExpressionAttributeValues={':t': now_iso, ':zero': 0, ':one': 1}
+        )
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+            return "Reporter agent already invoked previously. Skipping."
+        else:
+            raise
+
+    # Idempotency: skip if already has report payload
+    try:
+        _db = Database()
+        job = _db.jobs.find_by_id(job_id)
+    except Exception:
+        job = None
+    if job and job.get("report_payload"):
+        return "Reporter agent already completed previously. Skipping."
+
     result = await invoke_lambda_agent("Reporter", REPORTER_FUNCTION, {"job_id": job_id})
 
     if "error" in result:
@@ -211,6 +268,31 @@ async def invoke_charter_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
+    # Single-invocation lock using DynamoDB conditional update
+    try:
+        table = Database().client.table('jobs')
+        now_iso = datetime.utcnow().isoformat()
+        table.update_item(
+            Key={'id': job_id},
+            UpdateExpression='SET charter_started_at = if_not_exists(charter_started_at, :t), charter_invocations = if_not_exists(charter_invocations, :zero) + :one',
+            ConditionExpression='attribute_not_exists(charter_started_at)',
+            ExpressionAttributeValues={':t': now_iso, ':zero': 0, ':one': 1}
+        )
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+            return "Charter agent already invoked previously. Skipping."
+        else:
+            raise
+
+    # Idempotency: skip if charts already generated
+    try:
+        _db = Database()
+        job = _db.jobs.find_by_id(job_id)
+    except Exception:
+        job = None
+    if job and job.get("charts_payload"):
+        return "Charter agent already completed previously. Skipping."
+
     result = await invoke_lambda_agent(
         "Charter", CHARTER_FUNCTION, {"job_id": job_id}
     )
@@ -231,6 +313,31 @@ async def invoke_retirement_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
+    # Single-invocation lock using DynamoDB conditional update
+    try:
+        table = Database().client.table('jobs')
+        now_iso = datetime.utcnow().isoformat()
+        table.update_item(
+            Key={'id': job_id},
+            UpdateExpression='SET retirement_started_at = if_not_exists(retirement_started_at, :t), retirement_invocations = if_not_exists(retirement_invocations, :zero) + :one',
+            ConditionExpression='attribute_not_exists(retirement_started_at)',
+            ExpressionAttributeValues={':t': now_iso, ':zero': 0, ':one': 1}
+        )
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+            return "Retirement agent already invoked previously. Skipping."
+        else:
+            raise
+
+    # Idempotency: skip if retirement analysis already exists
+    try:
+        _db = Database()
+        job = _db.jobs.find_by_id(job_id)
+    except Exception:
+        job = None
+    if job and job.get("retirement_payload"):
+        return "Retirement agent already completed previously. Skipping."
+
     result = await invoke_lambda_agent("Retirement", RETIREMENT_FUNCTION, {"job_id": job_id})
 
     if "error" in result:

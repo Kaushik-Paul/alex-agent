@@ -6,6 +6,7 @@ import os
 import json
 import asyncio
 import logging
+from datetime import datetime
 from typing import Dict, Any
 
 from agents import Agent, Runner, trace
@@ -71,7 +72,7 @@ async def run_orchestrator(job_id: str) -> None:
                 agent,
                 input=task,
                 context=context,
-                max_turns=20
+                max_turns=8
             )
             
             # Mark job as completed after all agents finish
@@ -123,6 +124,55 @@ def lambda_handler(event, context):
                 }
 
             logger.info(f"Planner: Starting orchestration for job {job_id}")
+
+            # Idempotency guard: skip if this job is already running or completed
+            job = db.jobs.find_by_id(job_id)
+            if job:
+                status = job.get('status')
+                if status == 'completed':
+                    logger.info(f"Planner: Job {job_id} already completed. Skipping re-run.")
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({
+                            'success': True,
+                            'message': f'Job {job_id} already completed'
+                        })
+                    }
+                if status == 'running':
+                    logger.info(f"Planner: Duplicate invocation detected for job {job_id} (already running). Skipping.")
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({
+                            'success': True,
+                            'message': f'Job {job_id} is already in progress'
+                        })
+                    }
+
+            # Atomic lock: set job status to running if not already running/completed
+            try:
+                from botocore.exceptions import ClientError
+                table = db.client.table('jobs')
+                now_iso = datetime.utcnow().isoformat()
+                table.update_item(
+                    Key={'id': job_id},
+                    UpdateExpression='SET #s = :running, updated_at = :t, started_at = if_not_exists(started_at, :t)',
+                    ConditionExpression='attribute_not_exists(#s) OR #s IN (:pending, :queued, :created)',
+                    ExpressionAttributeNames={'#s': 'status'},
+                    ExpressionAttributeValues={':running': 'running', ':t': now_iso, ':pending': 'pending', ':queued': 'queued', ':created': 'created'}
+                )
+            except ClientError as e:
+                if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                    logger.info(f"Planner: Lock failed for job {job_id} (already running/completed). Skipping.")
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({
+                            'success': True,
+                            'message': f'Job {job_id} is already in progress or finished'
+                        })
+                    }
+                else:
+                    logger.error(f"Planner: Unexpected DynamoDB error acquiring lock: {str(e)}")
+                    raise
 
             # Run the orchestrator
             asyncio.run(run_orchestrator(job_id))

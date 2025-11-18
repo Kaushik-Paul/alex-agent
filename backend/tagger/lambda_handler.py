@@ -53,13 +53,12 @@ async def process_instruments(instruments: List[Dict[str, str]]) -> Dict[str, An
                 # Remove symbol as it's the key
                 del update_data['symbol']
                 
-                rows = db.client.update(
+                db.client.update_item(
                     'instruments',
-                    update_data,
-                    "symbol = :symbol",
-                    {'symbol': classification.symbol}
+                    {"symbol": classification.symbol},
+                    update_data
                 )
-                logger.info(f"Updated {classification.symbol} in database ({rows} rows)")
+                logger.info(f"Updated {classification.symbol} in database")
             else:
                 # Create new instrument
                 db.instruments.create_instrument(db_instrument)
