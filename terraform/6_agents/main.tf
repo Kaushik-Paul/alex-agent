@@ -24,12 +24,14 @@ data "aws_caller_identity" "current" {}
 # ========================================
 
 resource "aws_sqs_queue" "analysis_jobs" {
-  name                       = "alex-analysis-jobs"
-  delay_seconds             = 0
-  max_message_size          = 262144
-  message_retention_seconds = 86400  # 1 day
-  receive_wait_time_seconds = 10     # Long polling
-  visibility_timeout_seconds = 910   # 15 minutes + 10 seconds buffer (matches Planner Lambda timeout)
+  name                        = "alex-analysis-jobs.fifo"
+  fifo_queue                  = true
+  content_based_deduplication = true
+  delay_seconds               = 0
+  max_message_size            = 262144
+  message_retention_seconds   = 86400  # 1 day
+  receive_wait_time_seconds   = 10     # Long polling
+  visibility_timeout_seconds  = 910    # 15 minutes + 10 seconds buffer (matches Planner Lambda timeout)
   
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.analysis_jobs_dlq.arn
@@ -43,7 +45,9 @@ resource "aws_sqs_queue" "analysis_jobs" {
 }
 
 resource "aws_sqs_queue" "analysis_jobs_dlq" {
-  name = "alex-analysis-jobs-dlq"
+  name                        = "alex-analysis-jobs-dlq.fifo"
+  fifo_queue                  = true
+  content_based_deduplication = true
   
   tags = {
     Project = "alex"

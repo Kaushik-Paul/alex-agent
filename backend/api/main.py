@@ -7,7 +7,7 @@ import os
 import json
 import logging
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 import uuid
 
@@ -490,7 +490,33 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Create job
+        # If a recent job is already pending/running, reuse it to avoid duplicates
+        existing_jobs = db.jobs.find_by_user(clerk_user_id, limit=20)
+        recent_in_progress = None
+        if existing_jobs:
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            for j in existing_jobs:
+                status = j.get('status')
+                created_at = j.get('created_at')
+                try:
+                    created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00')) if created_at else None
+                except Exception:
+                    created_dt = None
+                if status in ['pending', 'running'] and (created_dt is None or (now - created_dt.replace(tzinfo=None) <= timedelta(minutes=5))):
+                    recent_in_progress = j
+                    break
+
+        if recent_in_progress:
+            job_id = recent_in_progress['id']
+            logger.info(f"Reusing existing in-progress job for user {clerk_user_id}: {job_id}")
+            # Do not enqueue a duplicate SQS message
+            return AnalyzeResponse(
+                job_id=str(job_id),
+                message="Analysis already in progress. Reusing existing job."
+            )
+
+        # Create a fresh job
         job_id = db.jobs.create_job(
             clerk_user_id=clerk_user_id,
             job_type="portfolio_analysis",
@@ -509,10 +535,16 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
                 'options': request.options
             }
 
-            sqs_client.send_message(
-                QueueUrl=SQS_QUEUE_URL,
-                MessageBody=json.dumps(message)
-            )
+            is_fifo = SQS_QUEUE_URL.endswith('.fifo')
+            params = {
+                'QueueUrl': SQS_QUEUE_URL,
+                'MessageBody': json.dumps(message)
+            }
+            if is_fifo:
+                params['MessageGroupId'] = clerk_user_id
+                params['MessageDeduplicationId'] = str(job_id)
+
+            sqs_client.send_message(**params)
             logger.info(f"Sent analysis job to SQS: {job_id}")
         else:
             logger.warning("SQS_QUEUE_URL not configured, job created but not queued")
