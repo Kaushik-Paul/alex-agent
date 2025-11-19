@@ -233,9 +233,21 @@ export default function AdvisorTeam() {
     }
   };
 
+  const parseApiUtc = (s?: string) => {
+    if (!s) return null;
+    let str = s.trim();
+    str = str.replace(/(\.\d{3})\d+$/, '$1');
+    if (!/[zZ]$/.test(str) && !/[+\-]\d{2}:\d{2}$/.test(str)) {
+      str = `${str}Z`;
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-IN', {
+    const d = parseApiUtc(dateString);
+    if (!d) return '';
+    return d.toLocaleString('en-IN', {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

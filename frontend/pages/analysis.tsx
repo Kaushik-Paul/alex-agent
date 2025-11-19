@@ -35,6 +35,7 @@ interface Job {
 interface JobListItem {
   id: string;
   created_at: string;
+  completed_at?: string;
   status: string;
   job_type: string;
 }
@@ -104,7 +105,11 @@ export default function Analysis() {
           // Find the latest completed job
           const latestCompletedJob = jobs
             .filter(j => j.status === 'completed')
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+            .sort((a, b) => {
+              const bt = parseApiUtc(b.completed_at || b.created_at)?.getTime() ?? 0;
+              const at = parseApiUtc(a.completed_at || a.created_at)?.getTime() ?? 0;
+              return bt - at;
+            })[0];
 
           if (latestCompletedJob) {
             // Load the full job details
@@ -134,8 +139,21 @@ export default function Analysis() {
   }, [job_id, router.isReady, getToken, router]);
 
 
+  const parseApiUtc = (s?: string) => {
+    if (!s) return null;
+    let str = s.trim();
+    str = str.replace(/(\.\d{3})\d+$/, '$1');
+    if (!/[zZ]$/.test(str) && !/[+\-]\d{2}:\d{2}$/.test(str)) {
+      str = `${str}Z`;
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString('en-IN', {
+    const d = parseApiUtc(dateString);
+    if (!d) return '';
+    return d.toLocaleString('en-IN', {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
