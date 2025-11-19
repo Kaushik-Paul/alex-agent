@@ -109,7 +109,9 @@ def handle_missing_instruments(job_id: str, db) -> None:
                 price_missing = not instrument.get("current_price") or float(instrument.get("current_price") or 0) <= 0
                 name_val = instrument.get("name", "")
                 is_placeholder_name = isinstance(name_val, str) and name_val.endswith(" - User Added")
-                if (not has_allocations) or price_missing or is_placeholder_name:
+                # Only re-tag if allocations are missing or price is missing.
+                # Do NOT re-tag solely due to placeholder name if data is otherwise complete.
+                if (not has_allocations) or price_missing:
                     missing.append(
                         {"symbol": position["symbol"], "name": instrument.get("name", "")}
                     )

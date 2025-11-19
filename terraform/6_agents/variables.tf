@@ -84,3 +84,13 @@ variable "tagger_max_per_call" {
   description = "Max instrument call for tagger agent"
   type = number
 }
+
+variable "orchestrator_mode" {
+  description = "More deterministic planner to prevent LLM loops"
+  type = string
+}
+
+variable "tagger_batch_mode" {
+  description = "Calls tagger agent in batch mode"
+  type = string
+}
