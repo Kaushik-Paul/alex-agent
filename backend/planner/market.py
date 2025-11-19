@@ -4,6 +4,7 @@ Market data functions using polygon.io for fetching real-time prices.
 
 import logging
 from typing import Set
+from datetime import datetime
 from prices import get_share_price
 
 logger = logging.getLogger()
@@ -88,7 +89,7 @@ def update_prices_for_symbols(symbols: Set[str], db) -> None:
         try:
             instrument = db.instruments.find_by_symbol(symbol)
             if instrument:
-                update_data = {'current_price': price}
+                update_data = {'current_price': price, 'last_price_updated_at': datetime.utcnow().isoformat()}
                 db.client.update_item(
                     'instruments',
                     {'symbol': symbol},

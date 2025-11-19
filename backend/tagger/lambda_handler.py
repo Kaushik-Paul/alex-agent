@@ -54,6 +54,9 @@ async def process_instruments(instruments: List[Dict[str, str]]) -> Dict[str, An
                 update_data = db_instrument.model_dump()
                 # Remove symbol as it's the key
                 del update_data['symbol']
+                # If we are updating price, stamp last_price_updated_at
+                if update_data.get('current_price') is not None:
+                    update_data['last_price_updated_at'] = datetime.utcnow().isoformat()
                 
                 db.client.update_item(
                     'instruments',
