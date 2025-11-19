@@ -192,9 +192,30 @@ export default function Dashboard() {
           setInstruments(instrumentsMap);
         }
 
-        // Get last analysis date
-        // This would come from the jobs endpoint in a real implementation
-        setLastAnalysisDate(null);
+        // Get last analysis date from Jobs API (latest completed job)
+        try {
+          const jobsResp = await fetch(`${API_URL}/api/jobs`, {
+            headers: {
+              "Authorization": `Bearer ${token}`,
+            },
+          });
+          if (jobsResp.ok) {
+            const data = await jobsResp.json();
+            const jobs = (data.jobs || []) as Array<any>;
+            const latestCompleted = jobs
+              .filter(j => j.status === 'completed')
+              .sort((a, b) => new Date(b.completed_at || b.created_at).getTime() - new Date(a.completed_at || a.created_at).getTime())[0];
+            if (latestCompleted) {
+              setLastAnalysisDate(latestCompleted.completed_at || latestCompleted.created_at);
+            } else {
+              setLastAnalysisDate(null);
+            }
+          } else {
+            setLastAnalysisDate(null);
+          }
+        } catch (e) {
+          setLastAnalysisDate(null);
+        }
 
       } catch (err) {
         console.error("Error loading data:", err);
@@ -440,7 +461,7 @@ export default function Dashboard() {
           <div className="bg-white rounded-lg shadow p-6 text-center">
             <h3 className="text-sm font-medium text-gray-500 mb-3">Last Analysis</h3>
             <p className="text-3xl font-bold text-dark">
-              {lastAnalysisDate ? new Date(lastAnalysisDate).toLocaleDateString() : "Never"}
+              {lastAnalysisDate ? new Date(lastAnalysisDate).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : "Never"}
             </p>
           </div>
         </div>
