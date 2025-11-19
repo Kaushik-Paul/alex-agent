@@ -12,6 +12,7 @@ from datetime import datetime
 from agents import Agent, Runner, trace
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from litellm.exceptions import RateLimitError
+from botocore.exceptions import ClientError
 
 try:
     from dotenv import load_dotenv
@@ -140,6 +141,38 @@ def lambda_handler(event, context):
                     from src import Database
 
                     db = Database()
+                    # Idempotency: if retirement analysis already exists, skip
+                    try:
+                        job_item = db.jobs.find_by_id(job_id)
+                    except Exception:
+                        job_item = None
+                    if job_item and job_item.get('retirement_payload'):
+                        logger.info(f"Retirement: analysis already exists for job {job_id}; skipping.")
+                        return {
+                            'statusCode': 200,
+                            'body': json.dumps({'success': True, 'message': 'Retirement already exists. Skipping.'})
+                        }
+
+                    # Single-execution lock at Retirement level (defense in depth)
+                    try:
+                        table = db.client.table('jobs')
+                        now_iso = datetime.utcnow().isoformat()
+                        table.update_item(
+                            Key={'id': job_id},
+                            UpdateExpression='SET retirement_running_lock = if_not_exists(retirement_running_lock, :t)',
+                            ConditionExpression='attribute_not_exists(retirement_running_lock)',
+                            ExpressionAttributeValues={':t': now_iso}
+                        )
+                    except ClientError as e:
+                        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                            logger.info(f"Retirement: Another invocation already holds the lock for job {job_id}. Skipping.")
+                            return {
+                                'statusCode': 200,
+                                'body': json.dumps({'success': True, 'message': 'Retirement already running. Skipping.'})
+                            }
+                        else:
+                            raise
+
                     job = db.jobs.find_by_id(job_id)
                     if job:
                         portfolio_data = job.get('request_payload', {}).get('portfolio_data', {})
@@ -159,6 +192,18 @@ def lambda_handler(event, context):
             result = asyncio.run(run_retirement_agent(job_id, portfolio_data))
 
             logger.info(f"Retirement completed for job {job_id}")
+
+            # Release lock
+            try:
+                if 'db' not in locals():
+                    db = Database()
+                table = db.client.table('jobs')
+                table.update_item(
+                    Key={'id': job_id},
+                    UpdateExpression='REMOVE retirement_running_lock'
+                )
+            except Exception as e:
+                logger.warning(f"Retirement: Failed to release lock for job {job_id}: {e}")
 
             return {
                 'statusCode': 200,

@@ -64,7 +64,7 @@ async def run_reporter_agent(
             agent,
             input=task,
             context=context,  # Pass the context
-            max_turns=10,
+            max_turns=2,
         )
 
         response = result.final_output
@@ -128,6 +128,33 @@ def lambda_handler(event, context):
 
             # Initialize database
             db = Database()
+
+            # Idempotency: if report already exists, return success (no-op)
+            try:
+                job_item = db.jobs.find_by_id(job_id)
+            except Exception:
+                job_item = None
+            if job_item and job_item.get("report_payload"):
+                logger.info(f"Reporter: report already exists for job {job_id}; skipping.")
+                return {"statusCode": 200, "body": json.dumps({"success": True, "message": "Report already exists. Skipping."})}
+
+            # Single-execution lock at Reporter level (defense in depth)
+            try:
+                table = db.client.table('jobs')
+                now_iso = datetime.utcnow().isoformat()
+                table.update_item(
+                    Key={'id': job_id},
+                    UpdateExpression='SET reporter_running_lock = if_not_exists(reporter_running_lock, :t)',
+                    ConditionExpression='attribute_not_exists(reporter_running_lock)',
+                    ExpressionAttributeValues={':t': now_iso}
+                )
+            except Exception as e:
+                from botocore.exceptions import ClientError
+                if isinstance(e, ClientError) and e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                    logger.info(f"Reporter: Another invocation already holds the lock for job {job_id}. Skipping.")
+                    return {"statusCode": 200, "body": json.dumps({"success": True, "message": "Reporter already running. Skipping."})}
+                else:
+                    raise
 
             portfolio_data = event.get("portfolio_data")
             if not portfolio_data:
@@ -214,6 +241,16 @@ def lambda_handler(event, context):
             )
 
             logger.info(f"Reporter completed for job {job_id}")
+            
+            # Release lock
+            try:
+                table = db.client.table('jobs')
+                table.update_item(
+                    Key={'id': job_id},
+                    UpdateExpression='REMOVE reporter_running_lock'
+                )
+            except Exception as e:
+                logger.warning(f"Reporter: Failed to release lock for job {job_id}: {e}")
 
             return {"statusCode": 200, "body": json.dumps(result)}
 

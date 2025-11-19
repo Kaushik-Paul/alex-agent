@@ -23,7 +23,7 @@ except ImportError:
 from src import Database
 
 from templates import ORCHESTRATOR_INSTRUCTIONS
-from agent import create_agent, handle_missing_instruments, load_portfolio_summary
+from agent import create_agent, handle_missing_instruments, load_portfolio_summary, invoke_reporter_internal, invoke_charter_internal, invoke_retirement_internal
 from market import update_instrument_prices
 from observability import observe
 
@@ -55,29 +55,33 @@ async def run_orchestrator(job_id: str) -> None:
         # Load portfolio summary (just statistics, not full data)
         portfolio_summary = await asyncio.to_thread(load_portfolio_summary, job_id, db)
         
-        # Create agent with tools and context
-        model, tools, task, context = create_agent(job_id, portfolio_summary, db)
+        # Deterministic orchestrator by default to prevent LLM loops
+        mode = os.getenv("ORCHESTRATOR_MODE", "deterministic").lower()
+        if mode == "deterministic":
+            # Run agents sequentially to avoid any residual race conditions
+            _ = await invoke_reporter_internal(job_id)
+            _ = await invoke_charter_internal(job_id)
+            _ = await invoke_retirement_internal(job_id)
+        else:
+            model, tools, task, context = create_agent(job_id, portfolio_summary, db)
+            with trace("Planner Orchestrator"):
+                from agent import PlannerContext
+                agent = Agent[PlannerContext](
+                    name="Financial Planner",
+                    instructions=ORCHESTRATOR_INSTRUCTIONS,
+                    model=model,
+                    tools=tools
+                )
+                await Runner.run(
+                    agent,
+                    input=task,
+                    context=context,
+                    max_turns=8
+                )
         
-        # Run the orchestrator
-        with trace("Planner Orchestrator"):
-            from agent import PlannerContext
-            agent = Agent[PlannerContext](
-                name="Financial Planner",
-                instructions=ORCHESTRATOR_INSTRUCTIONS,
-                model=model,
-                tools=tools
-            )
-            
-            result = await Runner.run(
-                agent,
-                input=task,
-                context=context,
-                max_turns=8
-            )
-            
-            # Mark job as completed after all agents finish
-            db.jobs.update_status(job_id, "completed")
-            logger.info(f"Planner: Job {job_id} completed successfully")
+        # Mark job as completed after all agents finish
+        db.jobs.update_status(job_id, "completed")
+        logger.info(f"Planner: Job {job_id} completed successfully")
             
     except Exception as e:
         logger.error(f"Planner: Error in orchestration: {e}", exc_info=True)
@@ -156,9 +160,9 @@ def lambda_handler(event, context):
                 table.update_item(
                     Key={'id': job_id},
                     UpdateExpression='SET #s = :running, updated_at = :t, started_at = if_not_exists(started_at, :t)',
-                    ConditionExpression='attribute_not_exists(#s) OR #s IN (:pending, :queued, :created)',
+                    ConditionExpression='attribute_not_exists(#s) OR #s = :pending',
                     ExpressionAttributeNames={'#s': 'status'},
-                    ExpressionAttributeValues={':running': 'running', ':t': now_iso, ':pending': 'pending', ':queued': 'queued', ':created': 'created'}
+                    ExpressionAttributeValues={':running': 'running', ':t': now_iso, ':pending': 'pending'}
                 )
             except ClientError as e:
                 if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':

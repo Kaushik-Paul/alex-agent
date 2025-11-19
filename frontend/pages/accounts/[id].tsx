@@ -19,6 +19,8 @@ interface Position {
   current_price?: number;
 }
 
+type PositionWithInstrument = Position & { instrument?: Partial<Instrument> | null };
+
 interface Account {
   id: string;
   account_name: string;
@@ -94,7 +96,12 @@ export default function AccountDetail() {
 
       if (positionsResponse.ok) {
         const data = await positionsResponse.json();
-        setPositions(data.positions || []);
+        const mapped = (data.positions || []).map((pos: PositionWithInstrument) => ({
+          ...pos,
+          // Keep type as number | undefined (avoid null)
+          current_price: pos.current_price ?? pos.instrument?.current_price ?? undefined,
+        }));
+        setPositions(mapped);
       }
 
       // Load instruments for autocomplete

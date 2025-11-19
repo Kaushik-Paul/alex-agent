@@ -8,6 +8,8 @@ import json
 import asyncio
 import logging
 from typing import List, Dict, Any
+from datetime import datetime
+from botocore.exceptions import ClientError
 
 from src import Database
 from src.schemas import InstrumentCreate
@@ -108,6 +110,7 @@ def lambda_handler(event, context):
     with observe():
         try:
             # Parse the event
+            job_id = event.get('job_id')
             instruments = event.get('instruments', [])
 
             if not instruments:
@@ -116,8 +119,50 @@ def lambda_handler(event, context):
                     'body': json.dumps({'error': 'No instruments provided'})
                 }
 
+            # Optional per-job idempotency: acquire lock if job_id provided
+            lock_acquired = False
+            if job_id:
+                try:
+                    table = db.client.table('jobs')
+                    now_iso = datetime.utcnow().isoformat()
+                    table.update_item(
+                        Key={'id': job_id},
+                        UpdateExpression='SET tagger_running_lock = if_not_exists(tagger_running_lock, :t)',
+                        ConditionExpression='attribute_not_exists(tagger_running_lock)',
+                        ExpressionAttributeValues={':t': now_iso}
+                    )
+                    lock_acquired = True
+                except ClientError as e:
+                    if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
+                        logger.info(f"Tagger: Lock exists for job {job_id}. Skipping duplicate invocation.")
+                        return {
+                            'statusCode': 200,
+                            'body': json.dumps({'success': True, 'message': 'Duplicate tagger invocation skipped'})
+                        }
+                    else:
+                        raise
+
             # Process all instruments in a single async context
             result = asyncio.run(process_instruments(instruments))
+
+            # Mark job as completed for tagger and release lock
+            if job_id:
+                try:
+                    db.client.update_item('jobs', {'id': job_id}, {
+                        'tagger_completed': True,
+                        'tagger_finished_at': datetime.utcnow().isoformat()
+                    })
+                except Exception as e:
+                    logger.warning(f"Tagger: Could not set tagger_completed for job {job_id}: {e}")
+                if lock_acquired:
+                    try:
+                        table = db.client.table('jobs')
+                        table.update_item(
+                            Key={'id': job_id},
+                            UpdateExpression='REMOVE tagger_running_lock'
+                        )
+                    except Exception as e:
+                        logger.warning(f"Tagger: Failed to release lock for job {job_id}: {e}")
 
             return {
                 'statusCode': 200,

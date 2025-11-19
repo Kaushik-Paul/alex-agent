@@ -106,32 +106,45 @@ def handle_missing_instruments(job_id: str, db) -> None:
                     and instrument.get("allocation_sectors")
                     and instrument.get("allocation_asset_class")
                 )
-                if not has_allocations:
+                price_missing = not instrument.get("current_price") or float(instrument.get("current_price") or 0) <= 0
+                name_val = instrument.get("name", "")
+                is_placeholder_name = isinstance(name_val, str) and name_val.endswith(" - User Added")
+                if (not has_allocations) or price_missing or is_placeholder_name:
                     missing.append(
                         {"symbol": position["symbol"], "name": instrument.get("name", "")}
                     )
             else:
                 missing.append({"symbol": position["symbol"], "name": ""})
 
+    # Dedupe by symbol to avoid repeated classifications
     if missing:
+        dedup = {}
+        for m in missing:
+            sym = m.get("symbol")
+            if sym and sym not in dedup:
+                dedup[sym] = m
+        missing = list(dedup.values())
+        # Record Tagger invocation; allow multiple runs per job up to cap
+        try:
+            table = db.client.table('jobs')
+            now_iso = datetime.utcnow().isoformat()
+            table.update_item(
+                Key={'id': job_id},
+                UpdateExpression='SET tagger_started_at = if_not_exists(tagger_started_at, :t), tagger_runs = if_not_exists(tagger_runs, :zero) + :one',
+                ExpressionAttributeValues={':t': now_iso, ':zero': 0, ':one': 1}
+            )
+        except Exception as e:
+            logger.warning(f"Planner: Could not update tagger run metadata for job {job_id}: {e}")
+
         # Limit number of instruments per tagger call to keep runtime tight
         try:
             max_per_call = int(os.getenv("TAGGER_MAX_PER_CALL", "12"))
         except Exception:
             max_per_call = 12
+        logger.info(f"Planner: Using TAGGER_MAX_PER_CALL={max_per_call}")
         if len(missing) > max_per_call:
             logger.info(f"Planner: Limiting tagger batch from {len(missing)} to {max_per_call} instruments")
             missing = missing[:max_per_call]
-
-        # Record this tagger attempt on the job for idempotency
-        try:
-            db.client.update_item(
-                'jobs',
-                {"id": job_id},
-                {"tagger_runs": tagger_runs + 1, "tagger_last_started_at": datetime.utcnow().isoformat()}
-            )
-        except Exception as e:
-            logger.warning(f"Planner: Could not update tagger_runs counter: {e}")
 
         logger.info(
             f"Planner: Found {len(missing)} instruments needing classification: {[m['symbol'] for m in missing]}"
@@ -141,7 +154,7 @@ def handle_missing_instruments(job_id: str, db) -> None:
             response = lambda_client.invoke(
                 FunctionName=TAGGER_FUNCTION,
                 InvocationType="RequestResponse",
-                Payload=json.dumps({"instruments": missing}),
+                Payload=json.dumps({"job_id": job_id, "instruments": missing}),
             )
 
             result = json.loads(response["Payload"].read())
@@ -151,6 +164,10 @@ def handle_missing_instruments(job_id: str, db) -> None:
                     logger.info(
                         f"Planner: InstrumentTagger completed - Tagged {len(missing)} instruments"
                     )
+                    try:
+                        db.client.update_item('jobs', {"id": job_id}, {"tagger_completed": True, "tagger_finished_at": datetime.utcnow().isoformat()})
+                    except Exception:
+                        pass
                 else:
                     logger.error(
                         f"Planner: InstrumentTagger failed with status {result['statusCode']}"
@@ -160,11 +177,12 @@ def handle_missing_instruments(job_id: str, db) -> None:
             logger.error(f"Planner: Error tagging instruments: {e}")
     else:
         logger.info("Planner: All instruments have allocation data")
-        # Mark tagger as completed for this job
         try:
             db.client.update_item('jobs', {"id": job_id}, {"tagger_completed": True})
-        except Exception as e:
-            logger.debug(f"Planner: Could not mark tagger_completed: {e}")
+        except Exception:
+            pass
+
+    # Tagging step complete (either no missing or successfully tagged)
 
 
 def load_portfolio_summary(job_id: str, db) -> Dict[str, Any]:
@@ -225,6 +243,21 @@ async def invoke_reporter_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
+    # Precondition: if tagger is in progress, defer reporter
+    try:
+        _db = Database()
+        job = _db.jobs.find_by_id(job_id)
+    except Exception:
+        job = None
+    if job and job.get("tagger_started_at") and not job.get("tagger_completed"):
+        return "Reporter deferred: Tagger in progress."
+
+    # Idempotency: skip if already has report payload
+    if job and job.get("report_payload"):
+        return "Reporter agent already completed previously. Skipping."
+
+    # Proceed without phase gating
+
     # Single-invocation lock using DynamoDB conditional update
     try:
         table = Database().client.table('jobs')
@@ -241,16 +274,9 @@ async def invoke_reporter_internal(job_id: str) -> str:
         else:
             raise
 
-    # Idempotency: skip if already has report payload
-    try:
-        _db = Database()
-        job = _db.jobs.find_by_id(job_id)
-    except Exception:
-        job = None
-    if job and job.get("report_payload"):
-        return "Reporter agent already completed previously. Skipping."
-
     result = await invoke_lambda_agent("Reporter", REPORTER_FUNCTION, {"job_id": job_id})
+
+    # Continue to next step
 
     if "error" in result:
         return f"Reporter agent failed: {result['error']}"
@@ -268,30 +294,21 @@ async def invoke_charter_internal(job_id: str) -> str:
     Returns:
         Confirmation message
     """
-    # Single-invocation lock using DynamoDB conditional update
+    # Record metadata for Charter invocation; allow re-invocation if charts not present
     try:
         table = Database().client.table('jobs')
         now_iso = datetime.utcnow().isoformat()
         table.update_item(
             Key={'id': job_id},
             UpdateExpression='SET charter_started_at = if_not_exists(charter_started_at, :t), charter_invocations = if_not_exists(charter_invocations, :zero) + :one',
-            ConditionExpression='attribute_not_exists(charter_started_at)',
             ExpressionAttributeValues={':t': now_iso, ':zero': 0, ':one': 1}
         )
-    except ClientError as e:
-        if e.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
-            return "Charter agent already invoked previously. Skipping."
-        else:
-            raise
+    except Exception as e:
+        logger.warning(f"Planner: Could not update charter metadata for job {job_id}: {e}")
 
-    # Idempotency: skip if charts already generated
-    try:
-        _db = Database()
-        job = _db.jobs.find_by_id(job_id)
-    except Exception:
-        job = None
-    if job and job.get("charts_payload"):
-        return "Charter agent already completed previously. Skipping."
+    # Proceed without phase gating
+
+    # Always attempt invocation; Charter Lambda itself is idempotent and will skip if charts exist
 
     result = await invoke_lambda_agent(
         "Charter", CHARTER_FUNCTION, {"job_id": job_id}
@@ -299,6 +316,8 @@ async def invoke_charter_internal(job_id: str) -> str:
 
     if "error" in result:
         return f"Charter agent failed: {result['error']}"
+
+    # Continue to next step
 
     return "Charter agent completed successfully. Portfolio visualizations have been created and saved."
 
@@ -329,6 +348,8 @@ async def invoke_retirement_internal(job_id: str) -> str:
         else:
             raise
 
+    # Proceed without phase gating
+
     # Idempotency: skip if retirement analysis already exists
     try:
         _db = Database()
@@ -342,6 +363,8 @@ async def invoke_retirement_internal(job_id: str) -> str:
 
     if "error" in result:
         return f"Retirement agent failed: {result['error']}"
+
+    # Final step complete
 
     return "Retirement agent completed successfully. Retirement projections have been calculated and saved."
 

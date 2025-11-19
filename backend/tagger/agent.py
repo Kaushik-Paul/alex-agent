@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-7-sonnet-20250219-v1:0")
 BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-west-2")
 OPENROUTER_MODEL_ID = os.getenv("OPENROUTER_MODEL_ID", "nvidia/nemotron-nano-12b-v2-vl:free")
+TAGGER_BATCH_MODE = os.getenv("TAGGER_BATCH_MODE", "true").lower() == "true"
 
 
 class AllocationBreakdown(BaseModel):
@@ -157,6 +158,14 @@ class InstrumentClassification(BaseModel):
         return v
 
 
+class BatchOutput(BaseModel):
+    """Structured output for multiple instrument classifications in order"""
+
+    classifications: List[InstrumentClassification] = Field(
+        description="Classifications for each instrument in the same order as input"
+    )
+
+
 async def classify_instrument(
     symbol: str, name: str, instrument_type: str = "etf"
 ) -> InstrumentClassification:
@@ -206,6 +215,48 @@ async def classify_instrument(
         raise
 
 
+async def batch_classify_instruments(instruments: List[dict]) -> List[InstrumentClassification]:
+    """Classify multiple instruments in a single model call using structured output.
+
+    Returns a list of InstrumentClassification objects in the same order as inputs.
+    """
+    try:
+        model_id = OPENROUTER_MODEL_ID
+        bedrock_region = os.getenv("BEDROCK_REGION", "us-west-2")
+        os.environ["AWS_REGION_NAME"] = bedrock_region
+
+        model = LitellmModel(model=f"openrouter/{model_id}")
+
+        # Build a concise multi-item prompt
+        lines = []
+        for idx, inst in enumerate(instruments, start=1):
+            lines.append(
+                f"{idx}. Symbol: {inst.get('symbol','')}, Name: {inst.get('name','')}, Type: {inst.get('instrument_type','etf')}"
+            )
+        task = (
+            "Classify the following instruments. For each, provide price and full allocations. "
+            "Return a field 'classifications' which is an array of items in the same order as the inputs.\n\n"
+            + "\n".join(lines)
+        )
+
+        with trace("Classify batch"):
+            agent = Agent(
+                name="InstrumentTagger",
+                instructions=TAGGER_INSTRUCTIONS + "\nReturn a 'classifications' array matching the input order.",
+                model=model,
+                tools=[],
+                output_type=BatchOutput,
+            )
+
+            result = await Runner.run(agent, input=task, max_turns=8)
+            batch = result.final_output_as(BatchOutput)
+            return batch.classifications
+
+    except Exception as e:
+        logger.error(f"Batch classification failed: {e}")
+        raise
+
+
 async def tag_instruments(instruments: List[dict]) -> List[InstrumentClassification]:
     """
     Tag multiple instruments with simple retry logic.
@@ -230,7 +281,16 @@ async def tag_instruments(instruments: List[dict]) -> List[InstrumentClassificat
     async def classify_with_retry(symbol, name, instrument_type):
         return await classify_instrument(symbol, name, instrument_type)
 
-    # Process instruments sequentially with small delay
+    # Try batch mode first for multiple instruments
+    if TAGGER_BATCH_MODE and len(instruments) > 1:
+        try:
+            batch_results = await batch_classify_instruments(instruments)
+            if batch_results and len(batch_results) > 0:
+                return batch_results
+        except Exception as e:
+            logger.warning(f"Falling back to per-instrument classification: {e}")
+
+    # Process instruments sequentially with small delay (fallback)
     results = []
     for i, instrument in enumerate(instruments):
         # Small delay between requests to avoid rate limits
