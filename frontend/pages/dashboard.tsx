@@ -46,6 +46,14 @@ interface Instrument {
   sector_allocation?: Record<string, number>;
 }
 
+interface JobListItem {
+  id: string;
+  created_at: string;
+  completed_at?: string;
+  status: string;
+  job_type: string;
+}
+
 export default function Dashboard() {
   const { user, isLoaded: userLoaded } = useUser();
   const { getToken } = useAuth();
@@ -201,7 +209,7 @@ export default function Dashboard() {
           });
           if (jobsResp.ok) {
             const data = await jobsResp.json();
-            const jobs = (data.jobs || []) as Array<any>;
+            const jobs: JobListItem[] = (data.jobs || []);
             const latestCompleted = jobs
               .filter(j => j.status === 'completed')
               .sort((a, b) => new Date(b.completed_at || b.created_at).getTime() - new Date(a.completed_at || a.created_at).getTime())[0];
@@ -213,7 +221,7 @@ export default function Dashboard() {
           } else {
             setLastAnalysisDate(null);
           }
-        } catch (e) {
+        } catch (_e) {
           setLastAnalysisDate(null);
         }
 
