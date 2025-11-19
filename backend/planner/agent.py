@@ -7,7 +7,7 @@ import json
 import boto3
 import logging
 from typing import Dict, List, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass
 from botocore.exceptions import ClientError
 from src import Database
@@ -107,11 +107,26 @@ def handle_missing_instruments(job_id: str, db) -> None:
                     and instrument.get("allocation_asset_class")
                 )
                 price_missing = not instrument.get("current_price") or float(instrument.get("current_price") or 0) <= 0
+                # Consider price stale if last update was more than 7 days ago (or unknown)
+                price_stale = False
+                try:
+                    last_price_updated_at = instrument.get("last_price_updated_at")
+                    if last_price_updated_at:
+                        last_dt = datetime.fromisoformat(str(last_price_updated_at))
+                        if datetime.utcnow() - last_dt > timedelta(days=7):
+                            price_stale = True
+                    else:
+                        # If we have a price but no timestamp, treat as stale to force a refresh once
+                        if instrument.get("current_price"):
+                            price_stale = True
+                except Exception:
+                    price_stale = True
                 name_val = instrument.get("name", "")
                 is_placeholder_name = isinstance(name_val, str) and name_val.endswith(" - User Added")
                 # Only re-tag if allocations are missing or price is missing.
                 # Do NOT re-tag solely due to placeholder name if data is otherwise complete.
-                if (not has_allocations) or price_missing:
+                # Also re-tag if price is stale (> 7 days) to refresh the latest price from tagger.
+                if (not has_allocations) or price_missing or price_stale:
                     missing.append(
                         {"symbol": position["symbol"], "name": instrument.get("name", "")}
                     )

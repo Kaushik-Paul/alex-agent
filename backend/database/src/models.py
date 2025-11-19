@@ -88,6 +88,9 @@ class Instruments(BaseModel):
             'created_at': now,
             'updated_at': now,
         }
+        # If we are setting an initial price, also stamp last_price_updated_at
+        if item.get('current_price') is not None:
+            item['last_price_updated_at'] = now
         item = {k: v for k, v in item.items() if v is not None}
         self.db.put_item(self.table_name, item)
         return validated['symbol']
