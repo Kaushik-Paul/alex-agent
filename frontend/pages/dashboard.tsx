@@ -75,6 +75,23 @@ export default function Dashboard() {
   const [northAmericaTarget, setNorthAmericaTarget] = useState(0);
   const [internationalTarget, setInternationalTarget] = useState(0);
 
+  const parseApiUtc = (s?: string) => {
+    if (!s) return null;
+    let str = s.trim();
+    str = str.replace(/(\.\d{3})\d+$/, '$1');
+    if (!/[zZ]$/.test(str) && !/[+\-]\d{2}:\d{2}$/.test(str)) {
+      str = `${str}Z`;
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const formatISTDate = (s?: string) => {
+    const d = parseApiUtc(s);
+    if (!d) return '';
+    return d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
+  };
+
   // Calculate portfolio summary
   const calculatePortfolioSummary = useCallback(() => {
     let totalValue = 0;
@@ -212,7 +229,11 @@ export default function Dashboard() {
             const jobs: JobListItem[] = (data.jobs || []);
             const latestCompleted = jobs
               .filter(j => j.status === 'completed')
-              .sort((a, b) => new Date(b.completed_at || b.created_at).getTime() - new Date(a.completed_at || a.created_at).getTime())[0];
+              .sort((a, b) => {
+                const bt = parseApiUtc(b.completed_at || b.created_at)?.getTime() ?? 0;
+                const at = parseApiUtc(a.completed_at || a.created_at)?.getTime() ?? 0;
+                return bt - at;
+              })[0];
             if (latestCompleted) {
               setLastAnalysisDate(latestCompleted.completed_at || latestCompleted.created_at);
             } else {
@@ -469,7 +490,7 @@ export default function Dashboard() {
           <div className="bg-white rounded-lg shadow p-6 text-center">
             <h3 className="text-sm font-medium text-gray-500 mb-3">Last Analysis</h3>
             <p className="text-3xl font-bold text-dark">
-              {lastAnalysisDate ? new Date(lastAnalysisDate).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : "Never"}
+              {lastAnalysisDate ? formatISTDate(lastAnalysisDate) : "Never"}
             </p>
           </div>
         </div>
