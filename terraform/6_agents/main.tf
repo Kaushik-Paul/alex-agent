@@ -232,6 +232,7 @@ resource "aws_lambda_function" "planner" {
   runtime     = "python3.12"
   timeout     = 900  # 15 minutes for planner
   memory_size = 2048  # 2GB for planner
+  reserved_concurrent_executions = 1
   
   environment {
     variables = {
@@ -240,6 +241,8 @@ resource "aws_lambda_function" "planner" {
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
       OPENROUTER_MODEL_ID = var.openrouter_model_id
+      ORCHESTRATOR_MODE  = "deterministic"
+      TAGGER_BATCH_MODE  = "true"
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       SAGEMAKER_ENDPOINT = var.sagemaker_endpoint
@@ -290,6 +293,8 @@ resource "aws_lambda_function" "tagger" {
       BEDROCK_MODEL_ID   = var.bedrock_model_id
       OPENROUTER_API_KEY = var.openrouter_api_key
       OPENROUTER_MODEL_ID = var.openrouter_model_id
+      TAGGER_BATCH_MODE  = "true"
+      TAGGER_MAX_PER_CALL = var.tagger_max_per_call
       BEDROCK_REGION     = var.bedrock_region
       DEFAULT_AWS_REGION = var.aws_region
       # LangFuse observability (optional)

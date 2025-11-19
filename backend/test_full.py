@@ -95,27 +95,35 @@ def main():
     job_id = db.jobs.create(job_data)
     print(f"  ✓ Created job: {job_id}")
     
-    # Get queue URL
-    QUEUE_NAME = 'alex-analysis-jobs'
-    response = sqs.list_queues(QueueNamePrefix=QUEUE_NAME)
-    queue_url = None
-    for url in response.get('QueueUrls', []):
-        if QUEUE_NAME in url:
-            queue_url = url
-            break
-    
-    if not queue_url:
-        print(f"  ❌ Queue {QUEUE_NAME} not found")
-        return 1
-    
-    print(f"  ✓ Found queue: {QUEUE_NAME}")
+    # Get FIFO queue URL explicitly
+    QUEUE_NAME = 'alex-analysis-jobs.fifo'
+    try:
+        queue_url = sqs.get_queue_url(QueueName=QUEUE_NAME)['QueueUrl']
+        print(f"  ✓ Found queue: {QUEUE_NAME}")
+    except Exception:
+        # Fallback to prefix search
+        response = sqs.list_queues(QueueNamePrefix='alex-analysis-jobs')
+        queue_url = None
+        for url in response.get('QueueUrls', []):
+            if 'alex-analysis-jobs.fifo' in url:
+                queue_url = url
+                break
+        if not queue_url:
+            print(f"  ❌ Queue {QUEUE_NAME} not found")
+            return 1
+        print(f"  ✓ Found queue: alex-analysis-jobs.fifo")
     
     # Send message to SQS
     print("\nTriggering analysis via SQS...")
-    response = sqs.send_message(
-        QueueUrl=queue_url,
-        MessageBody=json.dumps({'job_id': job_id})
-    )
+    params = {
+        'QueueUrl': queue_url,
+        'MessageBody': json.dumps({'job_id': job_id})
+    }
+    # FIFO queues require MessageGroupId
+    if queue_url.endswith('.fifo'):
+        params['MessageGroupId'] = test_user_id
+        params['MessageDeduplicationId'] = str(job_id)
+    response = sqs.send_message(**params)
     print(f"  ✓ Message sent: {response['MessageId']}")
     
     # Monitor job progress

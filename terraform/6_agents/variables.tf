@@ -79,3 +79,8 @@ variable "openrouter_model_id" {
   description = "Openrouter model id for market data"
   type        = string
 }
+
+variable "tagger_max_per_call" {
+  description = "Max instrument call for tagger agent"
+  type = number
+}
