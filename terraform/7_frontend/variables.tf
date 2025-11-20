@@ -15,3 +15,9 @@ variable "clerk_issuer" {
   type        = string
   default     = ""  # Not actually used but kept for backwards compatibility
 }
+
+variable "admin_urls" {
+  description = "Comma-separated admin emails exempt from analysis rate limit"
+  type        = string
+  default     = ""
+}

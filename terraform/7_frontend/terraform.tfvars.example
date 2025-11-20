@@ -9,3 +9,6 @@ aws_region = "us-east-1"
 # The issuer is: https://[your-instance].clerk.accounts.dev
 clerk_jwks_url = "https://engaging-feline-80.clerk.accounts.dev/.well-known/jwks.json"
 clerk_issuer   = "https://engaging-feline-80.clerk.accounts.dev"
+
+# Comma-separated admin emails exempt from analysis rate limit
+admin_urls = "you@example.com,qa@example.com"

@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import { API_URL } from '../lib/config';
 import { emitAnalysisCompleted, emitAnalysisFailed, emitAnalysisStarted } from '../lib/events';
 import Head from 'next/head';
+import { showToast } from '../components/Toast';
 
 interface Agent {
   icon: string;
@@ -218,15 +219,36 @@ export default function AdvisorTeam() {
           });
         }, 5000);
       } else {
-        throw new Error('Failed to start analysis');
+        // Parse server message and show toast (handles 429 with HH:mm)
+        let detail = 'Failed to start analysis';
+        try {
+          const data = await response.json();
+          if (data && typeof data.detail === 'string') {
+            detail = data.detail;
+          }
+        } catch (_) {
+          // ignore parse error
+        }
+        showToast('error', detail);
+        setProgress({
+          stage: 'error',
+          message: 'Failed to start analysis',
+          activeAgents: [],
+          error: detail
+        });
+        setIsAnalyzing(false);
+        setCurrentJobId(null);
+        return;
       }
     } catch (error) {
       console.error('Error starting analysis:', error);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      showToast('error', msg);
       setProgress({
         stage: 'error',
         message: 'Failed to start analysis',
         activeAgents: [],
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: msg
       });
       setIsAnalyzing(false);
       setCurrentJobId(null);

@@ -212,6 +212,8 @@ resource "aws_lambda_function" "api" {
       CLERK_JWKS_URL = var.clerk_jwks_url
       CLERK_ISSUER   = var.clerk_issuer
 
+      ADMIN_URLS = var.admin_urls
+
       # CORS configuration
       CORS_ORIGINS = "http://localhost:3000,https://${aws_cloudfront_distribution.main.domain_name}"
     }
