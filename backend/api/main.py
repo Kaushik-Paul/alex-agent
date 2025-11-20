@@ -272,29 +272,6 @@ async def create_account(account: AccountCreate, clerk_user_id: str = Depends(ge
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Global daily cap: 20 accounts per IST day
-        now_ist, start_str, end_str, next_midnight_ist = get_ist_midnight_window_utc()
-
-        tbl = db.client.table('accounts')
-        count = 0
-        scan_kwargs: Dict[str, Any] = {
-            'FilterExpression': Attr('created_at').between(start_str, end_str),
-            'ProjectionExpression': 'id'
-        }
-        while True:
-            resp = tbl.scan(**scan_kwargs)
-            count += len(resp.get('Items', []))
-            if count >= 20:
-                break
-            lek = resp.get('LastEvaluatedKey')
-            if not lek:
-                break
-            scan_kwargs['ExclusiveStartKey'] = lek
-
-        if count >= 20:
-            wait_str = format_wait_until(next_midnight_ist, now_ist)
-            raise HTTPException(status_code=429, detail=f"We have exceeded account creation for today. Please try after {wait_str}")
-
         # Create account
         account_id = db.accounts.create_account(
             clerk_user_id=clerk_user_id,
