@@ -86,7 +86,7 @@ export default function AdvisorTeam() {
   useEffect(() => {
     const checkJobStatusLocal = async (jobId: string) => {
       try {
-        const token = await getToken();
+        const token = await getToken({ template: 'user-metadata' });
         const response = await fetch(`${API_URL}/api/jobs/${jobId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -160,7 +160,7 @@ export default function AdvisorTeam() {
 
   const fetchJobs = async () => {
     try {
-      const token = await getToken();
+      const token = await getToken({ template: 'user-metadata' });
       const response = await fetch(`${API_URL}/api/jobs`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -185,7 +185,7 @@ export default function AdvisorTeam() {
     });
 
     try {
-      const token = await getToken();
+      const token = await getToken({ template: 'user-metadata' });
       const response = await fetch(`${API_URL}/api/analyze`, {
         method: 'POST',
         headers: {
