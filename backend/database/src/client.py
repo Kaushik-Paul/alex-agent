@@ -128,6 +128,33 @@ class DynamoClient:
         resp = tbl.query(**kwargs)
         return [self._decode_item(i) for i in resp.get("Items", [])]
 
+    def query_gsi_between(self, logical_table: str, index_name: str, key_name: str, key_value: Any, sk_name: str, sk_start: Any, sk_end: Any, limit: Optional[int] = None, scan_index_forward: Optional[bool] = None, filter_expression: Optional[Any] = None) -> List[Dict[str, Any]]:
+        """Query a GSI with partition key equality and sort key BETWEEN.
+
+        Args:
+            logical_table: Logical table name
+            index_name: GSI name
+            key_name: Partition key attribute name in the index
+            key_value: Partition key value
+            sk_name: Sort key attribute name in the index
+            sk_start: Start value for BETWEEN (inclusive)
+            sk_end: End value for BETWEEN (inclusive)
+            limit: Optional max items to return
+            scan_index_forward: Optional order
+            filter_expression: Optional non-key FilterExpression
+        """
+        tbl = self.table(logical_table)
+        key_cond = Key(key_name).eq(key_value) & Key(sk_name).between(sk_start, sk_end)
+        kwargs: Dict[str, Any] = {"IndexName": index_name, "KeyConditionExpression": key_cond}
+        if filter_expression is not None:
+            kwargs["FilterExpression"] = filter_expression
+        if limit:
+            kwargs["Limit"] = limit
+        if scan_index_forward is not None:
+            kwargs["ScanIndexForward"] = scan_index_forward
+        resp = tbl.query(**kwargs)
+        return [self._decode_item(i) for i in resp.get("Items", [])]
+
     def scan(self, logical_table: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         tbl = self.table(logical_table)
         kwargs: Dict[str, Any] = {}

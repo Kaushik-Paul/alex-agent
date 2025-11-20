@@ -19,6 +19,7 @@ import boto3
 from mangum import Mangum
 from dotenv import load_dotenv
 from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCredentials
+from boto3.dynamodb.conditions import Attr
 
 from src import Database
 from src.schemas import (
@@ -71,7 +72,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         401: "Your session has expired. Please sign in again.",
         403: "You don't have permission to access this resource.",
         404: "The requested resource was not found.",
-        429: "Too many requests. Please slow down and try again later.",
         500: "An internal error occurred. Please try again later.",
         503: "The service is temporarily unavailable. Please try again later."
     }
@@ -109,6 +109,64 @@ async def get_current_user_id(creds: HTTPAuthorizationCredentials = Depends(cler
     user_id = creds.decoded["sub"]
     logger.info(f"Authenticated user: {user_id}")
     return user_id
+
+def get_ist_midnight_window_utc():
+    now_utc = datetime.utcnow()
+    now_ist = now_utc + timedelta(hours=5, minutes=30)
+    start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_midnight_ist = start_ist + timedelta(days=1)
+    start_utc = start_ist - timedelta(hours=5, minutes=30)
+    end_utc = next_midnight_ist - timedelta(hours=5, minutes=30)
+    return now_ist, start_utc.isoformat(), end_utc.isoformat(), next_midnight_ist
+
+def format_wait_until(next_midnight_ist: datetime, now_ist: datetime) -> str:
+    delta = next_midnight_ist - now_ist
+    total = int(delta.total_seconds())
+    hours = total // 3600
+    minutes = (total % 3600) // 60
+    return f"{hours:02d}:{minutes:02d}"
+
+def extract_email_from_creds(creds: HTTPAuthorizationCredentials) -> str:
+    """Best-effort extraction of email from Clerk JWT claims."""
+    claims = creds.decoded or {}
+    # Direct keys that might be present
+    for key in [
+        'email',
+        'email_address',
+        'emailAddress',
+        'primary_email_address',
+        'primaryEmailAddress',
+    ]:
+        val = claims.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip().lower()
+    # Arrays that might include emails
+    for arr_key in ['email_addresses', 'emailAddresses']:
+        arr = claims.get(arr_key)
+        if isinstance(arr, list):
+            for item in arr:
+                if isinstance(item, str) and item.strip():
+                    return item.strip().lower()
+                if isinstance(item, dict):
+                    for k in ['email', 'email_address', 'emailAddress']:
+                        v = item.get(k)
+                        if isinstance(v, str) and v.strip():
+                            return v.strip().lower()
+    return ''
+
+def is_admin_email(creds: HTTPAuthorizationCredentials) -> bool:
+    admin_env = os.getenv('ADMIN_URLS', '')
+    admin_entries = {e.strip().lower() for e in admin_env.split(',') if e.strip()}
+    token_email = extract_email_from_creds(creds)
+    user_id = str(creds.decoded.get('sub', '')).strip().lower() if creds.decoded else ''
+    identifiers = {i for i in [token_email, user_id] if i}
+    matched = any(identifier in admin_entries for identifier in identifiers)
+    if matched:
+        try:
+            logger.info(f"Admin exemption applied for identifiers: {identifiers}")
+        except Exception:
+            pass
+    return matched
 
 # Request/Response models
 class UserResponse(BaseModel):
@@ -232,6 +290,29 @@ async def create_account(account: AccountCreate, clerk_user_id: str = Depends(ge
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Global daily cap: 20 accounts per IST day
+        now_ist, start_str, end_str, next_midnight_ist = get_ist_midnight_window_utc()
+
+        tbl = db.client.table('accounts')
+        count = 0
+        scan_kwargs: Dict[str, Any] = {
+            'FilterExpression': Attr('created_at').between(start_str, end_str),
+            'ProjectionExpression': 'id'
+        }
+        while True:
+            resp = tbl.scan(**scan_kwargs)
+            count += len(resp.get('Items', []))
+            if count >= 20:
+                break
+            lek = resp.get('LastEvaluatedKey')
+            if not lek:
+                break
+            scan_kwargs['ExclusiveStartKey'] = lek
+
+        if count >= 20:
+            wait_str = format_wait_until(next_midnight_ist, now_ist)
+            raise HTTPException(status_code=429, detail=f"We have exceeded account creation for today. Please try after {wait_str}")
+
         # Create account
         account_id = db.accounts.create_account(
             clerk_user_id=clerk_user_id,
@@ -244,6 +325,8 @@ async def create_account(account: AccountCreate, clerk_user_id: str = Depends(ge
         created_account = db.accounts.find_by_id(account_id)
         return created_account
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating account: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -480,7 +563,7 @@ async def list_instruments(clerk_user_id: str = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends(get_current_user_id)):
+async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends(get_current_user_id), creds: HTTPAuthorizationCredentials = Depends(clerk_guard)):
     """Trigger portfolio analysis"""
 
     try:
@@ -489,6 +572,24 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
 
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        # Admin emails exempt from limit
+        if not is_admin_email(creds):
+            now_ist, start_str, end_str, next_midnight_ist = get_ist_midnight_window_utc()
+
+            items = db.client.query_gsi_between(
+                'jobs',
+                'user-index',
+                'clerk_user_id',
+                clerk_user_id,
+                'created_at',
+                start_str,
+                end_str,
+                filter_expression=Attr('job_type').eq('portfolio_analysis')
+            )
+            if len(items) >= 2:
+                wait_str = format_wait_until(next_midnight_ist, now_ist)
+                raise HTTPException(status_code=429, detail=f"Can run analysis 2 times in 24 hours try after {wait_str}")
 
         # If a recent job is already pending/running, reuse it to avoid duplicates
         existing_jobs = db.jobs.find_by_user(clerk_user_id, limit=20)
@@ -554,6 +655,8 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
             message="Analysis started. Check job status for results."
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error triggering analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))

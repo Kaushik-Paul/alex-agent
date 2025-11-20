@@ -6,6 +6,7 @@ import ConfirmModal from "../components/ConfirmModal";
 import { API_URL } from "../lib/config";
 import { SkeletonTable } from "../components/Skeleton";
 import Head from "next/head";
+import { showToast } from "../components/Toast";
 
 interface Position {
   id: string;
@@ -213,12 +214,20 @@ export default function Accounts() {
 
       if (response.ok) {
         setMessage({ type: 'success', text: 'Account created successfully' });
+        showToast('success', 'Account created successfully');
         setShowAddModal(false);
         setNewAccount({ name: '', purpose: '', cash_balance: '' });
         await loadAccounts();
       } else {
-        const error = await response.json();
-        setMessage({ type: 'error', text: error.detail || 'Failed to create account' });
+        let detail = 'Failed to create account';
+        try {
+          const error = await response.json();
+          if (error && typeof error.detail === 'string') {
+            detail = error.detail;
+          }
+        } catch (_) {}
+        setMessage({ type: 'error', text: detail });
+        showToast('error', detail);
       }
     } catch (error) {
       console.error('Error creating account:', error);
