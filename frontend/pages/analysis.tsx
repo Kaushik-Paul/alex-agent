@@ -68,7 +68,7 @@ export default function Analysis() {
   useEffect(() => {
     const loadJob = async (jobId: string) => {
       try {
-        const token = await getToken();
+        const token = await getToken({ template: 'user-metadata' });
         const response = await fetch(`${API_URL}/api/jobs/${jobId}`, {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -91,7 +91,7 @@ export default function Analysis() {
     const loadLatestJob = async () => {
       setFetchingLatest(true);
       try {
-        const token = await getToken();
+        const token = await getToken({ template: 'user-metadata' });
         // First, get the list of jobs to find the latest completed one
         const response = await fetch(`${API_URL}/api/jobs`, {
           headers: {

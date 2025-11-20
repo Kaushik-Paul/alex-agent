@@ -136,7 +136,7 @@ export default function Dashboard() {
       if (!userLoaded || !user) return;
 
       try {
-        const token = await getToken();
+        const token = await getToken({ template: 'user-metadata' });
         if (!token) {
           setError("Not authenticated");
           setLoading(false);
@@ -263,7 +263,7 @@ export default function Dashboard() {
 
     const handleAnalysisCompleted = async () => {
       try {
-        const token = await getToken();
+        const token = await getToken({ template: 'user-metadata' });
         if (!token) return;
 
         console.log('Analysis completed - refreshing dashboard data...');
@@ -361,7 +361,7 @@ export default function Dashboard() {
     setError(null);
 
     try {
-      const token = await getToken();
+      const token = await getToken({ template: 'user-metadata' });
       if (!token) throw new Error("Not authenticated");
 
       const updateData = {
