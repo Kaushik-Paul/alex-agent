@@ -107,7 +107,8 @@ async def get_current_user_id(creds: HTTPAuthorizationCredentials = Depends(cler
     # The clerk_guard dependency already validated the token
     # creds.decoded contains the JWT payload
     user_id = creds.decoded["sub"]
-    logger.info(f"Authenticated user: {user_id}")
+    email = extract_email_from_creds(creds) or 'unknown'
+    logger.info(f"Authenticated user: {user_id} (email: {email})")
     return user_id
 
 def get_ist_midnight_window_utc():
@@ -129,29 +130,9 @@ def format_wait_until(next_midnight_ist: datetime, now_ist: datetime) -> str:
 def extract_email_from_creds(creds: HTTPAuthorizationCredentials) -> str:
     """Best-effort extraction of email from Clerk JWT claims."""
     claims = creds.decoded or {}
-    # Direct keys that might be present
-    for key in [
-        'email',
-        'email_address',
-        'emailAddress',
-        'primary_email_address',
-        'primaryEmailAddress',
-    ]:
-        val = claims.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip().lower()
-    # Arrays that might include emails
-    for arr_key in ['email_addresses', 'emailAddresses']:
-        arr = claims.get(arr_key)
-        if isinstance(arr, list):
-            for item in arr:
-                if isinstance(item, str) and item.strip():
-                    return item.strip().lower()
-                if isinstance(item, dict):
-                    for k in ['email', 'email_address', 'emailAddress']:
-                        v = item.get(k)
-                        if isinstance(v, str) and v.strip():
-                            return v.strip().lower()
+    val = claims.get('email')
+    if isinstance(val, str) and val.strip():
+        return val.strip().lower()
     return ''
 
 def is_admin_email(creds: HTTPAuthorizationCredentials) -> bool:
@@ -281,10 +262,11 @@ async def list_accounts(clerk_user_id: str = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/accounts")
-async def create_account(account: AccountCreate, clerk_user_id: str = Depends(get_current_user_id)):
+async def create_account(account: AccountCreate, clerk_user_id: str = Depends(get_current_user_id), creds: HTTPAuthorizationCredentials = Depends(clerk_guard)):
     """Create new account"""
 
     try:
+        logger.info(f"/api/accounts (create) called by user_id={clerk_user_id}, email={extract_email_from_creds(creds)}")
         # Verify user exists
         user = db.users.find_by_clerk_id(clerk_user_id)
         if not user:
@@ -567,6 +549,7 @@ async def trigger_analysis(request: AnalyzeRequest, clerk_user_id: str = Depends
     """Trigger portfolio analysis"""
 
     try:
+        logger.info(f"/api/analyze called by user_id={clerk_user_id}, email={extract_email_from_creds(creds)}")
         # Get user
         user = db.users.find_by_clerk_id(clerk_user_id)
 
