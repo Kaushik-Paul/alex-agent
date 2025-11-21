@@ -1,4 +1,4 @@
-## Alex - the Agentic Learning Equities Explainer
+## Alex - The Agentic Learning Equities Explainer
 
 [![Live Website](https://img.shields.io/badge/Live_Website-6c63ff?logo=rocket&logoColor=white&labelColor=5a52d3)](https://projects.kaushikpaul.co.in/alex)
 
