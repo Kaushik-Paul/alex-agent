@@ -14,9 +14,13 @@ interface ToastProps {
 
 const Toast = ({ toast, onClose }: ToastProps) => {
   useEffect(() => {
+    if (toast.duration === 0) {
+      return;
+    }
+
     const timer = setTimeout(() => {
       onClose(toast.id);
-    }, toast.duration || 3000);
+    }, toast.duration ?? 3000);
 
     return () => clearTimeout(timer);
   }, [toast, onClose]);
@@ -29,7 +33,7 @@ const Toast = ({ toast, onClose }: ToastProps) => {
 
   const icon = {
     success: '✓',
-    error: '✕',
+    error: '⚠️',
     info: 'ℹ'
   }[toast.type];
 
@@ -39,9 +43,10 @@ const Toast = ({ toast, onClose }: ToastProps) => {
       <p className="flex-1">{toast.message}</p>
       <button
         onClick={() => onClose(toast.id)}
-        className="hover:opacity-80 transition-opacity"
+        aria-label="Close notification"
+        className="ml-1 w-6 h-6 flex items-center justify-center rounded-full border border-white/70 bg-white/10 hover:bg-white/20 transition-colors"
       >
-        ✕
+        <span className="text-sm leading-none">✕</span>
       </button>
     </div>
   );
