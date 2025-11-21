@@ -746,10 +746,12 @@ async def list_jobs(clerk_user_id: str = Depends(get_current_user_id)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/limited-jobs")
-async def list_jobs_limited(limit: int = 5, clerk_user_id: str = Depends(get_current_user_id)):
+async def list_jobs_limited(limit: int = 5, status: Optional[str] = None, clerk_user_id: str = Depends(get_current_user_id)):
     try:
         user_jobs = db.jobs.find_by_user(clerk_user_id, limit=max(limit, 5) * 2)
-        user_jobs.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        if status:
+            user_jobs = [j for j in user_jobs if j.get('status') == status]
+        user_jobs.sort(key=lambda x: (x.get('completed_at') or x.get('created_at') or ''), reverse=True)
         sliced = user_jobs[:max(0, min(limit, 100))]
         summaries = [
             {
