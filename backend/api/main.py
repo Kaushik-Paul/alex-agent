@@ -745,6 +745,27 @@ async def list_jobs(clerk_user_id: str = Depends(get_current_user_id)):
         logger.error(f"Error listing jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/limited-jobs")
+async def list_jobs_limited(limit: int = 5, clerk_user_id: str = Depends(get_current_user_id)):
+    try:
+        user_jobs = db.jobs.find_by_user(clerk_user_id, limit=max(limit, 5) * 2)
+        user_jobs.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        sliced = user_jobs[:max(0, min(limit, 100))]
+        summaries = [
+            {
+                "id": j.get("id"),
+                "created_at": j.get("created_at"),
+                "completed_at": j.get("completed_at"),
+                "status": j.get("status"),
+                "job_type": j.get("job_type"),
+            }
+            for j in sliced
+        ]
+        return {"jobs": summaries}
+    except Exception as e:
+        logger.error(f"Error listing limited jobs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/reset-accounts")
 async def reset_accounts(clerk_user_id: str = Depends(get_current_user_id)):
     """Delete all accounts for the current user"""

@@ -161,7 +161,7 @@ export default function AdvisorTeam() {
   const fetchJobs = async () => {
     try {
       const token = await getToken({ template: 'user-metadata' });
-      const response = await fetch(`${API_URL}/api/jobs`, {
+      const response = await fetch(`${API_URL}/api/limited-jobs?limit=5`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -414,7 +414,7 @@ export default function AdvisorTeam() {
                 <p className="text-gray-500 italic">No previous analyses found. Start your first analysis above!</p>
               ) : (
                 <div className="space-y-3">
-                  {jobs.slice(0, 5).map((job) => (
+                  {jobs.map((job) => (
                     <div
                       key={job.id}
                       className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"

@@ -219,7 +219,7 @@ export default function Dashboard() {
 
         // Get last analysis date from Jobs API (latest completed job)
         try {
-          const jobsResp = await fetch(`${API_URL}/api/jobs`, {
+          const jobsResp = await fetch(`${API_URL}/api/limited-jobs?limit=10`, {
             headers: {
               "Authorization": `Bearer ${token}`,
             },
@@ -242,7 +242,7 @@ export default function Dashboard() {
           } else {
             setLastAnalysisDate(null);
           }
-        } catch (_e) {
+        } catch {
           setLastAnalysisDate(null);
         }
 
