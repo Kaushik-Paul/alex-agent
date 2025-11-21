@@ -26,7 +26,8 @@ Alex is a production‑style, serverless, multi‑agent financial planning platf
 - **uv** (Python package/runtime manager)
 - **Node.js 20+ and npm**
 - **Clerk account** (for authentication)
-- **AWS Bedrock model access** for **Amazon Nova Pro** (recommended) in at least one region
+- **OpenRouter account & API key** (primary LLM provider used by the agents)
+- (Recommended) **AWS Bedrock model access** for **Amazon Nova Pro** if you want to exercise the Bedrock integration paths
 - (Optional) **Polygon.io API key** for live market data
 
 Throughout this guide, paths are relative to the project root, which we’ll call `alex/`.
