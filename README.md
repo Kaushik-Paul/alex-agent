@@ -1,8 +1,6 @@
 ## Alex - the Agentic Learning Equities Explainer
 
-[![Live Website](https://img.shields.io/badge/Live_Website-6c63ff?logo=rocket&logoColor=white&labelColor=5a52d3)](https://projects.kaushikpaul.co.in/)
-
-Project instance: http://projects.kaushikpaul.co.in/alex
+[![Live Website](https://img.shields.io/badge/Live_Website-6c63ff?logo=rocket&logoColor=white&labelColor=5a52d3)](https://projects.kaushikpaul.co.in/alex)
 
 Alex is a **multi-agent, serverless financial planning platform** where specialized AI agents work together to research markets, analyze portfolios, generate charts, and project retirement outcomes. It uses OpenRouter as the primary LLM gateway (with OpenRouter-compatible models) and can also call AWS Bedrock (e.g., Nova Pro) where configured. Combined with S3 Vectors and structured tool-calling, Alex produces research-backed, explainable recommendations rather than one-off chat responses.
 
