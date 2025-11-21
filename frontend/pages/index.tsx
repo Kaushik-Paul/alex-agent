@@ -1,12 +1,15 @@
-import { SignInButton, SignedIn, SignedOut, UserButton, useClerk } from "@clerk/nextjs";
+import { SignInButton, SignedIn, SignedOut, UserButton, useClerk, useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import Head from "next/head";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { useRouter } from "next/router";
 import { API_URL } from "../lib/config";
 import { showToast } from "../components/Toast";
 
 export default function Home() {
-  const { openSignUp } = useClerk();
+  const router = useRouter();
+  const { isSignedIn } = useAuth();
+  const { openSignUp, signOut } = useClerk();
 
   const handleSignupClick = useCallback(async () => {
     try {
@@ -21,9 +24,32 @@ export default function Home() {
           return;
         }
       }
-    } catch (_) {}
+    } catch {}
     openSignUp();
   }, [openSignUp]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!router.isReady) return;
+      const flag = router.query.signupCheck === '1';
+      if (!flag || !isSignedIn) return;
+      try {
+        const resp = await fetch(`${API_URL}/api/signup-allowance`);
+        if (resp.ok) {
+          const data = await resp.json();
+          const remaining = Number(data.remaining || 0);
+          const tryAfter = String(data.try_after || "00:00");
+          if (remaining <= 0) {
+            const [hh, mm] = tryAfter.split(":");
+            showToast('error', `Signups are full today. Please try after ${hh} hours and ${mm} minutes.`);
+            await signOut();
+            router.replace('/', undefined, { shallow: true });
+          }
+        }
+      } catch {}
+    };
+    run();
+  }, [router, isSignedIn, signOut]);
   return (
     <>
       <Head>
@@ -38,7 +64,7 @@ export default function Home() {
           </div>
           <div className="flex gap-4">
             <SignedOut>
-              <SignInButton mode="modal">
+              <SignInButton mode="modal" signUpForceRedirectUrl="/?signupCheck=1" signUpFallbackRedirectUrl="/?signupCheck=1">
                 <button className="px-6 py-2 text-primary border border-primary rounded-lg hover:bg-primary hover:text-white transition-colors">
                   Sign In
                 </button>
