@@ -219,7 +219,7 @@ export default function Dashboard() {
 
         // Get last analysis date from Jobs API (latest completed job)
         try {
-          const jobsResp = await fetch(`${API_URL}/api/limited-jobs?limit=10`, {
+          const jobsResp = await fetch(`${API_URL}/api/limited-jobs?status=completed&limit=1`, {
             headers: {
               "Authorization": `Bearer ${token}`,
             },
@@ -227,13 +227,7 @@ export default function Dashboard() {
           if (jobsResp.ok) {
             const data = await jobsResp.json();
             const jobs: JobListItem[] = (data.jobs || []);
-            const latestCompleted = jobs
-              .filter(j => j.status === 'completed')
-              .sort((a, b) => {
-                const bt = parseApiUtc(b.completed_at || b.created_at)?.getTime() ?? 0;
-                const at = parseApiUtc(a.completed_at || a.created_at)?.getTime() ?? 0;
-                return bt - at;
-              })[0];
+            const latestCompleted = jobs[0];
             if (latestCompleted) {
               setLastAnalysisDate(latestCompleted.completed_at || latestCompleted.created_at);
             } else {
