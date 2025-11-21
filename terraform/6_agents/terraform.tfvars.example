@@ -5,11 +5,8 @@
 # Should match your database region from Part 5
 aws_region = "us-east-1"
 
-# Aurora cluster ARN from Part 5 (get from Terraform output)
-aurora_cluster_arn = "arn:aws:rds:us-east-1:123456789012:cluster:alex-aurora-cluster"
-
-# Aurora secret ARN from Part 5 (get from Terraform output)
-aurora_secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:alex-aurora-credentials-xxxxx"
+# DynamoDB table prefix from Part 5 outputs
+db_table_prefix = "alex_"
 
 # S3 Vectors bucket name from Part 3
 # Format: alex-vectors-{your-aws-account-id}

@@ -9,7 +9,7 @@ Each part of the course has its own independent Terraform directory:
 - **`2_sagemaker/`** - SageMaker serverless endpoint for embeddings (Guide 2)
 - **`3_ingestion/`** - S3 Vectors, Lambda, and API Gateway for document ingestion (Guide 3)
 - **`4_researcher/`** - App Runner service for AI researcher agent (Guide 4)
-- **`5_database/`** - Aurora Serverless v2 PostgreSQL with Data API (Guide 5)
+- **`5_database/`** - DynamoDB tables for Alex data model (Guide 5)
 - **`6_agents/`** - Lambda functions for agent orchestra (Guide 6)
 - **`7_frontend/`** - API Lambda and frontend infrastructure (Guide 7)
 - **`8_observability/`** - LangFuse and monitoring setup (Guide 8)
@@ -58,8 +58,7 @@ Some Terraform configurations require environment variables from your `.env` fil
 - `OPENAI_API_KEY` - For the researcher agent (Part 4)
 - `ALEX_API_ENDPOINT` - API Gateway endpoint (from Part 3)
 - `ALEX_API_KEY` - API key for ingestion (from Part 3)
-- `AURORA_CLUSTER_ARN` - Aurora cluster ARN (from Part 5)
-- `AURORA_SECRET_ARN` - Secrets Manager ARN (from Part 5)
+- `DB_TABLE_PREFIX` - DynamoDB table prefix (from Part 5 outputs)
 - `VECTOR_BUCKET` - S3 Vectors bucket name (from Part 3)
 - `BEDROCK_MODEL_ID` - Bedrock model to use (Part 6)
 
