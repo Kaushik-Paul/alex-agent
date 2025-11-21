@@ -198,6 +198,12 @@ The Terraform stacks are:
 
 For a step‑by‑step deployment walkthrough (including which Terraform outputs map to which environment variables), see **[INSTALLATION.md](./INSTALLATION.md)**.
 
+### Operational responsibility & costs
+
+Running Alex in your own AWS account incurs infrastructure and operational costs (for example, Lambda, S3, DynamoDB, SageMaker, App Runner, CloudFront, data transfer, and related services). You are solely responsible for configuring budgets, limits, monitoring, and protections (including WAF, rate limiting, and DDoS mitigation) that are appropriate for your deployment.
+
+The project owner(s), maintainer(s), and contributor(s) are not responsible or liable for any cloud charges, overages, or financial loss arising from your use of this project, including but not limited to costs incurred as a result of misuse, misconfiguration, or denial-of-service / DDoS attacks against your infrastructure.
+
 ## Environment Variables (Overview)
 
 Key groups of variables (see `.env.example` for a complete list):
