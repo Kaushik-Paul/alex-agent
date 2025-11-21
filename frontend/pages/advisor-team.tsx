@@ -161,7 +161,7 @@ export default function AdvisorTeam() {
   const fetchJobs = async () => {
     try {
       const token = await getToken({ template: 'user-metadata' });
-      const response = await fetch(`${API_URL}/api/limited-jobs?limit=5`, {
+      const response = await fetch(`${API_URL}/api/limited-jobs?limit=10`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
