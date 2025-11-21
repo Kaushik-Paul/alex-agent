@@ -21,3 +21,21 @@ variable "admin_urls" {
   type        = string
   default     = ""
 }
+
+variable "clerk_webhook_secret" {
+  description = "Clerk webhook secret (Svix) used to verify Clerk webhooks"
+  type        = string
+  default     = ""
+}
+
+variable "clerk_secret_key" {
+  description = "Clerk secret key for Admin API calls"
+  type        = string
+  default     = ""
+}
+
+variable "max_signups_per_day" {
+  description = "Max number of Clerk signups allowed per IST day"
+  type        = number
+  default     = 20
+}

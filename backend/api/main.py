@@ -16,10 +16,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 import boto3
+import httpx
 from mangum import Mangum
 from dotenv import load_dotenv
 from fastapi_clerk_auth import ClerkConfig, ClerkHTTPBearer, HTTPAuthorizationCredentials
 from boto3.dynamodb.conditions import Attr
+from svix.webhooks import Webhook
 
 from src import Database
 from src.schemas import (
@@ -187,6 +189,91 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+@app.post("/api/clerk-webhook")
+async def clerk_webhook(request: Request):
+    secret = os.getenv("CLERK_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        logger.error("CLERK_WEBHOOK_SECRET not configured")
+        return {"status": "ignored"}
+
+    try:
+        headers = {
+            "svix-id": request.headers.get("svix-id"),
+            "svix-timestamp": request.headers.get("svix-timestamp"),
+            "svix-signature": request.headers.get("svix-signature"),
+        }
+        body = await request.body()
+        wh = Webhook(secret)
+        event = wh.verify(body.decode("utf-8"), headers)
+    except Exception as e:
+        logger.error(f"Webhook verification failed: {e}")
+        return {"status": "ignored"}
+
+    try:
+        event_type = event.get("type") if isinstance(event, dict) else None
+        data = event.get("data", {}) if isinstance(event, dict) else {}
+    except Exception:
+        event_type, data = None, {}
+
+    if event_type == "user.created":
+        user_id = data.get("id", "") if isinstance(data, dict) else ""
+        email = None
+        try:
+            emails = data.get("email_addresses") or []
+            primary_id = data.get("primary_email_address_id")
+            primary = None
+            if isinstance(emails, list):
+                if primary_id:
+                    for ea in emails:
+                        if isinstance(ea, dict) and ea.get("id") == primary_id:
+                            primary = ea
+                            break
+                if primary is None and emails and isinstance(emails[0], dict):
+                    primary = emails[0]
+            if isinstance(primary, dict):
+                email = primary.get("email_address")
+        except Exception:
+            pass
+
+        now_ist, _start_utc, _end_utc, next_midnight_ist = get_ist_midnight_window_utc()
+        date_ist = now_ist.date().isoformat()
+        new_count = db.signup_counts.increment(date_ist)
+        limit = int(os.getenv("MAX_SIGNUPS_PER_DAY", "20"))
+
+        if new_count > limit:
+            try_after = format_wait_until(next_midnight_ist, now_ist)
+            clerk_sk = os.getenv("CLERK_SECRET_KEY", "").strip()
+            if clerk_sk and user_id:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        url = f"https://api.clerk.com/v1/users/{user_id}"
+                        resp = await client.delete(url, headers={"Authorization": f"Bearer {clerk_sk}"})
+                        if resp.status_code >= 400:
+                            logger.error(f"Failed to delete Clerk user {user_id}: {resp.status_code} {resp.text}")
+                        else:
+                            logger.info(f"Deleted Clerk user {user_id} due to daily cap ({new_count}/{limit}). try_after={try_after}")
+                except Exception as e:
+                    logger.error(f"Error deleting Clerk user {user_id}: {e}")
+            else:
+                logger.error("CLERK_SECRET_KEY missing or user_id empty; cannot delete over-cap user")
+        else:
+            logger.info(f"Clerk signup accepted for user_id={user_id}, email={email}, count={new_count}/{limit}")
+
+    return {"status": "ok"}
+
+@app.get("/api/signup-allowance")
+async def signup_allowance():
+    now_ist, _start_utc, _end_utc, next_midnight_ist = get_ist_midnight_window_utc()
+    date_ist = now_ist.date().isoformat()
+    count = db.signup_counts.get_count(date_ist)
+    try:
+        count_int = int(count)
+    except Exception:
+        count_int = int(float(count) if count is not None else 0)
+    limit = int(os.getenv("MAX_SIGNUPS_PER_DAY", "20"))
+    remaining = max(0, limit - min(count_int, limit))
+    try_after = format_wait_until(next_midnight_ist, now_ist)
+    return {"limit": limit, "count": count_int, "remaining": remaining, "try_after": try_after}
 @app.get("/api/user", response_model=UserResponse)
 async def get_or_create_user(
     clerk_user_id: str = Depends(get_current_user_id),

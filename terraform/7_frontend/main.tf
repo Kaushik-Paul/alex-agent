@@ -214,6 +214,11 @@ resource "aws_lambda_function" "api" {
 
       ADMIN_URLS = var.admin_urls
 
+      # Clerk webhook + admin API for signup cap
+      CLERK_WEBHOOK_SECRET = var.clerk_webhook_secret
+      CLERK_SECRET_KEY     = var.clerk_secret_key
+      MAX_SIGNUPS_PER_DAY  = tostring(var.max_signups_per_day)
+
       # CORS configuration
       CORS_ORIGINS = "http://localhost:3000,https://${aws_cloudfront_distribution.main.domain_name}"
     }

@@ -1,8 +1,29 @@
-import { SignInButton, SignUpButton, SignedIn, SignedOut, UserButton } from "@clerk/nextjs";
+import { SignInButton, SignedIn, SignedOut, UserButton, useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import Head from "next/head";
+import { useCallback } from "react";
+import { API_URL } from "../lib/config";
+import { showToast } from "../components/Toast";
 
 export default function Home() {
+  const { openSignUp } = useClerk();
+
+  const handleSignupClick = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API_URL}/api/signup-allowance`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const remaining = Number(data.remaining || 0);
+        const tryAfter = String(data.try_after || "00:00");
+        if (remaining <= 0) {
+          const [hh, mm] = tryAfter.split(":");
+          showToast('error', `Signups are full today. Please try after ${hh} hours and ${mm} minutes.`);
+          return;
+        }
+      }
+    } catch (_) {}
+    openSignUp();
+  }, [openSignUp]);
   return (
     <>
       <Head>
@@ -22,11 +43,9 @@ export default function Home() {
                   Sign In
                 </button>
               </SignInButton>
-              <SignUpButton mode="modal">
-                <button className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors">
-                  Get Started
-                </button>
-              </SignUpButton>
+              <button onClick={handleSignupClick} className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors">
+                Get Started
+              </button>
             </SignedOut>
             <SignedIn>
               <div className="flex items-center gap-4">
@@ -54,11 +73,9 @@ export default function Home() {
           </p>
           <div className="flex gap-6 justify-center">
             <SignedOut>
-              <SignUpButton mode="modal">
-                <button className="px-8 py-4 bg-ai-accent text-white text-lg rounded-lg hover:bg-purple-700 transition-colors shadow-lg">
-                  Start Your Analysis
-                </button>
-              </SignUpButton>
+              <button onClick={handleSignupClick} className="px-8 py-4 bg-ai-accent text-white text-lg rounded-lg hover:bg-purple-700 transition-colors shadow-lg">
+                Start Your Analysis
+              </button>
             </SignedOut>
             <SignedIn>
               <Link href="/dashboard">
@@ -140,11 +157,9 @@ export default function Home() {
           <p className="text-xl mb-8 opacity-90">
             Join thousands of investors using AI to optimize their portfolios
           </p>
-          <SignUpButton mode="modal">
-            <button className="px-8 py-4 bg-accent text-dark font-semibold text-lg rounded-lg hover:bg-yellow-500 transition-colors shadow-lg">
-              Get Started Free
-            </button>
-          </SignUpButton>
+          <button onClick={handleSignupClick} className="px-8 py-4 bg-accent text-dark font-semibold text-lg rounded-lg hover:bg-yellow-500 transition-colors shadow-lg">
+            Get Started Free
+          </button>
         </div>
       </section>
 

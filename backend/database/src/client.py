@@ -53,6 +53,7 @@ class DynamoClient:
             "accounts": f"{prefix}accounts",
             "positions": f"{prefix}positions",
             "jobs": f"{prefix}jobs",
+            "signup_counts": f"{prefix}signup_counts",
         }
         if table_names:
             self.tables.update(table_names)
