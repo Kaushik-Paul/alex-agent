@@ -45,6 +45,22 @@ resource "aws_dynamodb_table" "users" {
   }
 }
 
+resource "aws_dynamodb_table" "signup_counts" {
+  name         = "${var.db_table_prefix}signup_counts"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "date_ist"
+
+  attribute {
+    name = "date_ist"
+    type = "S"
+  }
+
+  tags = {
+    Project = local.project
+    Part    = local.part
+  }
+}
+
 resource "aws_dynamodb_table" "instruments" {
   name         = "${var.db_table_prefix}instruments"
   billing_mode = "PAY_PER_REQUEST"

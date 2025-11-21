@@ -77,6 +77,9 @@ def main():
             f.write("fastapi-clerk-auth>=0.0.7\n")
             f.write("pydantic>=2.0.0\n")
             f.write("python-dotenv>=1.0.0\n")
+            f.write("httpx>=0.28.1\n")
+            f.write("svix>=1.20.0\n")
+            f.write("python-jose>=3.5.0\n")
 
         # Create Dockerfile
         dockerfile_content = """

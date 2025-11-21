@@ -306,6 +306,34 @@ class Jobs(BaseModel):
         self.db.delete_item(self.table_name, {"id": job_id})
 
 
+class SignupCounts(BaseModel):
+    table_name = 'signup_counts'
+
+    def increment(self, date_ist: str) -> int:
+        tbl = self.db.table(self.table_name)
+        now = datetime.utcnow().isoformat()
+        resp = tbl.update_item(
+            Key={"date_ist": date_ist},
+            UpdateExpression="ADD #count :inc SET #updated_at = :now",
+            ExpressionAttributeNames={"#count": "count", "#updated_at": "updated_at"},
+            ExpressionAttributeValues={":inc": Decimal(1), ":now": now},
+            ReturnValues="UPDATED_NEW",
+        )
+        new_count = resp.get("Attributes", {}).get("count", 0)
+        try:
+            return int(new_count)
+        except Exception:
+            return int(float(new_count) if new_count is not None else 0)
+
+    def get_count(self, date_ist: str) -> int:
+        item = self.db.get_item(self.table_name, {"date_ist": date_ist})
+        if not item:
+            return 0
+        try:
+            return int(item.get("count", 0))
+        except Exception:
+            return int(float(item.get("count", 0)) or 0)
+
 class Database:
     """Main database interface providing access to all models (DynamoDB)"""
 
@@ -318,3 +346,4 @@ class Database:
         self.accounts = Accounts(self.client)
         self.positions = Positions(self.client)
         self.jobs = Jobs(self.client)
+        self.signup_counts = SignupCounts(self.client)
