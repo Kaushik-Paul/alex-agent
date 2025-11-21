@@ -2,15 +2,15 @@
 
 [![Live App](https://img.shields.io/badge/Live_App-alexagent.pp.ua-6c63ff?logo=amazonaws&logoColor=white&labelColor=5a52d3)](https://www.alexagent.pp.ua/)
 
-Alex is a **multi-agent, serverless financial planning platform**. It analyzes equity portfolios, projects retirement outcomes, and explains its reasoning in clear, investor-friendly language.
+Alex is a **multi-agent, serverless financial planning platform** where specialized AI agents work together to research markets, analyze portfolios, generate charts, and project retirement outcomes. It uses OpenRouter as the primary LLM gateway (with OpenRouter-compatible models) and can also call AWS Bedrock (e.g., Nova Pro) where configured. Combined with S3 Vectors and structured tool-calling, Alex produces research-backed, explainable recommendations rather than one-off chat responses.
 
 ## Features
 
 - **Multi-agent AI advisor**  
-  Five specialized agents collaborate:
+  Production-style agent team built on the OpenAI Agents SDK, running as separate Lambda functions and orchestrated via SQS. Five specialized agents collaborate:
   - Planner (orchestrator)
   - Tagger (instrument classification)
-  - Reporter (portfolio analysis)
+  - Reporter (portfolio analysis, grounded in the research knowledge base)
   - Charter (charting & visualizations)
   - Retirement (retirement projections)
 
@@ -21,9 +21,9 @@ Alex is a **multi-agent, serverless financial planning platform**. It analyzes e
   - One-click population of realistic test data
 
 - **Research knowledge base**  
-  - App Runner research agent that fetches market intel via the web  
-  - SageMaker serverless embeddings (MiniLM)  
-  - S3 Vectors for low-cost semantic search (≈90% cheaper than typical vector DBs)
+  - Autonomous App Runner research agent that continuously gathers market intel via web tools and writes it into your knowledge base  
+  - SageMaker serverless embeddings (MiniLM) to turn text into dense vectors  
+  - S3 Vectors for low-cost semantic search (≈90% cheaper than typical vector DBs), so downstream agents can ground their reasoning in prior research
 
 - **Retirement planning**  
   - Monte Carlo-style projections  
@@ -34,6 +34,11 @@ Alex is a **multi-agent, serverless financial planning platform**. It analyzes e
   - Serverless backend on AWS (Lambda, DynamoDB, API Gateway, SQS, App Runner)  
   - Next.js frontend on S3 + CloudFront with Clerk authentication  
   - Optional monitoring, guardrails, and observability (CloudWatch, WAF, LangFuse)
+
+- **Usage guardrails & abuse protection**  
+  - Daily signup cap (default 20 new accounts per IST day, configurable via `MAX_SIGNUPS_PER_DAY`) tracked via a dedicated `signup_counts` table  
+  - Per-user portfolio analysis cap (default 2 analyses per IST day) to control costs and prevent abuse, with clear "try after" messaging  
+  - Admin users (configured via `ADMIN_URLS`) are exempt from the analysis limit for debugging and demos
 
 ## Architecture Overview
 
@@ -59,7 +64,8 @@ At a high level, Alex is composed of four layers:
   - Planner receives portfolio analysis requests via SQS  
   - Delegates work to Tagger, Reporter, Charter, and Retirement agents  
   - Each agent is a Lambda function implemented with the OpenAI Agents SDK and writes its results back to the database  
-  - Jobs track the full lifecycle and combine results into a single analysis view
+  - Jobs track the full lifecycle and combine results into a single analysis view  
+  - This pattern showcases a production-grade, parallel, tool-using agent system rather than a single monolithic prompt
 
 ## Tech Stack
 
@@ -67,7 +73,7 @@ At a high level, Alex is composed of four layers:
 |--------------------|-------------|
 | **Frontend**       | Next.js 15 (Pages Router), React 19, TypeScript, Tailwind-style utilities, Recharts |
 | **Backend API**    | FastAPI, Mangum (Lambda adapter), Pydantic, `uv` for Python env management |
-| **Agents**         | `openai-agents` (OpenAI Agents SDK), Pydantic AI, AWS Bedrock (Nova Pro / OSS models) |
+| **Agents**         | `openai-agents` (OpenAI Agents SDK), Pydantic AI, OpenRouter (primary), optional AWS Bedrock (Nova Pro / inference profiles) |
 | **Data & Search**  | DynamoDB (on-demand tables), S3 Vectors, SageMaker serverless embeddings |
 | **Infra**          | AWS Lambda, App Runner, API Gateway, SQS, CloudFront, S3, Terraform |
 | **Auth & Obs.**    | Clerk, AWS CloudWatch, optional WAF/GuardDuty, LangFuse traces |
